@@ -2,7 +2,7 @@
   "name": "ss14-studio",
   "displayName": "SS14 Studio",
   "description": "A visual studio for Space Station 14: inspect and edit construction graphs, with more SS14 tooling on the way.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "ss14studio",
   "license": "MIT",
   "private": true,
@@ -158,7 +158,7 @@
     "build": "node esbuild.mjs",
     "watch": "node esbuild.mjs --watch",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "package": "node -e \"require('node:fs').mkdirSync('../../releases',{recursive:true})\" && vsce package --no-dependencies --out ../../releases/ss14-studio-0.1.0.vsix"
+    "package": "node -e \"require('node:fs').mkdirSync('../../releases',{recursive:true})\" && vsce package --no-dependencies --out ../../releases/ss14-studio-0.1.1.vsix"
   },
   "devDependencies": {
     "@ss14-studio/core": "*",

@@ -1,5 +1,54 @@
 import { getIncoming, reachableNodes } from './analyze.js';
-import type { ConstructionGraph, Diagnostic } from './model.js';
+import type {
+  ConstructionEdge,
+  ConstructionGraph,
+  ConstructionStep,
+  Diagnostic,
+  TaggedEntry,
+} from './model.js';
+
+export interface ValidateGraphOptions {
+  /**
+   * Nodes that can be entered from outside the graph, such as entity
+   * `Construction.node` values and recipe `startNode` pointers. These are valid
+   * starting points even when they are not reachable from the declared start.
+   */
+  entryNodes?: Iterable<string>;
+}
+
+function stableValue(value: unknown): string {
+  if (value == null) return 'null';
+  if (Array.isArray(value)) return `[${value.map(stableValue).join(',')}]`;
+  if (typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableValue(record[key])}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function entrySignature(entry: TaggedEntry): string {
+  return `${entry.type ?? ''}:${stableValue(entry.fields)}`;
+}
+
+function stepSignature(step: ConstructionStep): string {
+  return [
+    step.kind,
+    stableValue(step.fields),
+    step.doAfter ?? '',
+    step.completed.map(entrySignature).join(','),
+  ].join(':');
+}
+
+function edgeSignature(edge: ConstructionEdge): string {
+  return [
+    edge.conditions.map(entrySignature).join(','),
+    edge.completed.map(entrySignature).join(','),
+    edge.steps.map(stepSignature).join(','),
+  ].join('|');
+}
 
 function diag(
   graph: ConstructionGraph,
@@ -11,8 +60,12 @@ function diag(
   };
 }
 
-export function validateGraph(graph: ConstructionGraph): Diagnostic[] {
+export function validateGraph(
+  graph: ConstructionGraph,
+  options: ValidateGraphOptions = {},
+): Diagnostic[] {
   const diagnostics: Diagnostic[] = [];
+  const entryNodes = new Set(options.entryNodes ?? []);
 
   if (!graph.id.trim()) {
     diagnostics.push(
@@ -74,7 +127,7 @@ export function validateGraph(graph: ConstructionGraph): Diagnostic[] {
   }
 
   for (const node of graph.nodes) {
-    const edgeTargets = new Map<string, number>();
+    const edgesByTarget = new Map<string, Array<{ signature: string; index: number }>>();
     node.edges.forEach((edge, index) => {
       if (!names.has(edge.target)) {
         diagnostics.push({
@@ -88,13 +141,15 @@ export function validateGraph(graph: ConstructionGraph): Diagnostic[] {
         });
       }
 
-      edgeTargets.set(edge.target, (edgeTargets.get(edge.target) ?? 0) + 1);
+      const group = edgesByTarget.get(edge.target) ?? [];
+      group.push({ signature: edgeSignature(edge), index });
+      edgesByTarget.set(edge.target, group);
 
       if (edge.target === node.name) {
         diagnostics.push({
-          severity: 'warning',
+          severity: 'info',
           code: 'edge.self',
-          message: `Node "${node.name}" has an edge to itself.`,
+          message: `Node "${node.name}" has an in-place edge back to itself.`,
           line: edge.line,
           span: edge.span,
           node: node.name,
@@ -130,20 +185,32 @@ export function validateGraph(graph: ConstructionGraph): Diagnostic[] {
       });
     });
 
-    for (const [target, count] of edgeTargets) {
-      if (count > 1) {
+    for (const [target, group] of edgesByTarget) {
+      const signatures = new Map<string, number>();
+      for (const item of group) {
+        signatures.set(item.signature, (signatures.get(item.signature) ?? 0) + 1);
+      }
+      for (const [signature, count] of signatures) {
+        if (count < 2) continue;
+        const second = group.filter((item) => item.signature === signature)[1];
+        const edge = second ? node.edges[second.index] : undefined;
         diagnostics.push({
           severity: 'warning',
           code: 'edge.duplicate',
-          message: `Node "${node.name}" has ${count} edges to "${target}".`,
-          line: node.line,
-          span: node.span,
+          message: `Node "${node.name}" has ${count} identical edges to "${target}".`,
+          line: edge?.line ?? node.line,
+          span: edge?.span ?? node.span,
           node: node.name,
+          ...(second ? { edge: { from: node.name, to: target, index: second.index } } : {}),
         });
       }
     }
 
-    if (node.edges.length === 0 && node.name !== graph.start) {
+    if (
+      node.edges.length === 0 &&
+      node.name !== graph.start &&
+      !entryNodes.has(node.name)
+    ) {
       const incoming = getIncoming(graph, node.name);
       if (incoming.length === 0) {
         diagnostics.push({
@@ -159,7 +226,7 @@ export function validateGraph(graph: ConstructionGraph): Diagnostic[] {
   }
 
   if (graph.start && names.has(graph.start)) {
-    const reachable = reachableNodes(graph);
+    const reachable = reachableNodes(graph, entryNodes);
     for (const node of graph.nodes) {
       if (!reachable.has(node.name)) {
         diagnostics.push({

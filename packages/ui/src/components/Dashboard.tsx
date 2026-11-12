@@ -255,10 +255,10 @@ export function Dashboard({ index, recent, onOpen, onCreate, onRefresh }: Dashbo
     () =>
       summaries
         .filter((summary) => totalIssues(summary) > 0)
-        .sort((left, right) => totalIssues(right) - totalIssues(left))
-        .slice(0, 5),
+        .sort((left, right) => totalIssues(right) - totalIssues(left)),
     [summaries],
   );
+  const visibleIssueSummaries = issueSummaries.slice(0, 5);
 
   if (!index) return <DashboardSkeleton />;
 
@@ -442,7 +442,7 @@ export function Dashboard({ index, recent, onOpen, onCreate, onRefresh }: Dashbo
               </div>
             ) : (
               <div className="issue-list">
-                {issueSummaries.map((summary) => (
+                {visibleIssueSummaries.map((summary) => (
                   <button type="button" key={summary.key} onClick={() => onOpen(summary.key)}>
                     <span className={`issue-dot ${summary.errors > 0 ? 'error' : 'warning'}`} />
                     <span className="issue-name">{summary.id}</span>

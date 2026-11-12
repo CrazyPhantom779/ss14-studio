@@ -72,9 +72,16 @@ export function findPath(
   return null;
 }
 
-export function reachableNodes(graph: ConstructionGraph): Set<string> {
+export function reachableNodes(
+  graph: ConstructionGraph,
+  extraStarts: Iterable<string> = [],
+): Set<string> {
+  const known = new Set(graph.nodes.map((node) => node.name));
   const reachable = new Set<string>();
   const queue = [graph.start];
+  for (const name of extraStarts) {
+    if (known.has(name)) queue.push(name);
+  }
   while (queue.length > 0) {
     const current = queue.shift()!;
     if (reachable.has(current)) continue;

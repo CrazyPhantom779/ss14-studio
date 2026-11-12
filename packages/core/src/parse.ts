@@ -1,8 +1,10 @@
 import {
+  isAlias,
   isMap,
   isScalar,
   isSeq,
   parseDocument,
+  type Document,
   type Node,
   type YAMLMap,
 } from 'yaml';
@@ -43,10 +45,33 @@ export interface ParseFileOptions {
 interface ParseContext {
   source: string;
   lines: LineIndex;
+  document: Document.Parsed;
   filePath: string;
   relativePath: string;
   fileKey: string;
   diagnostics: Diagnostic[];
+}
+
+/**
+ * Resolve YAML anchors/aliases while keeping the original node for formatting.
+ * SS14 graph files commonly reuse step and edge sequences with `*anchor`.
+ */
+function resolveNode(
+  ctx: ParseContext,
+  node: Node | null | undefined,
+  seen = new Set<Node>(),
+): Node | null {
+  if (!node) return null;
+  if (!isAlias(node)) return node;
+  if (seen.has(node)) return null;
+  seen.add(node);
+  let resolved: Node | null | undefined;
+  try {
+    resolved = node.resolve(ctx.document) as Node | undefined;
+  } catch {
+    return null;
+  }
+  return resolved ? resolveNode(ctx, resolved, seen) : null;
 }
 
 function push(
@@ -70,9 +95,11 @@ function push(
 
 function parseTaggedEntry(
   ctx: ParseContext,
-  node: Node,
+  input: Node,
   scope: string,
 ): TaggedEntry | null {
+  const node = resolveNode(ctx, input);
+  if (!node) return null;
   const span = spanOf(node, ctx.lines);
   if (!span) return null;
 
@@ -113,10 +140,11 @@ function parseTaggedEntry(
 
 function parseTaggedSeq(
   ctx: ParseContext,
-  node: Node | null,
+  input: Node | null,
   scope: string,
 ): TaggedEntry[] {
   const entries: TaggedEntry[] = [];
+  const node = resolveNode(ctx, input);
   for (const item of sequenceItems(node)) {
     const entry = parseTaggedEntry(ctx, item, scope);
     if (entry) entries.push(entry);
@@ -165,7 +193,9 @@ function detectStepKind(fields: Record<string, unknown>): StepKind {
   return 'unknown';
 }
 
-function parseStep(ctx: ParseContext, node: Node): ConstructionStep | null {
+function parseStep(ctx: ParseContext, input: Node): ConstructionStep | null {
+  const node = resolveNode(ctx, input);
+  if (!node) return null;
   const span = spanOf(node, ctx.lines);
   if (!span) return null;
   if (!isMap(node)) {
@@ -205,7 +235,9 @@ function parseStep(ctx: ParseContext, node: Node): ConstructionStep | null {
   };
 }
 
-function parseEdge(ctx: ParseContext, node: Node, from: string, index: number): ConstructionEdge | null {
+function parseEdge(ctx: ParseContext, input: Node, from: string, index: number): ConstructionEdge | null {
+  const node = resolveNode(ctx, input);
+  if (!node) return null;
   const span = spanOf(node, ctx.lines);
   if (!span) return null;
   if (!isMap(node)) {
@@ -213,21 +245,22 @@ function parseEdge(ctx: ParseContext, node: Node, from: string, index: number): 
     return null;
   }
 
-  const target = stringValue(getNode(node, 'to'));
+  const targetNode = resolveNode(ctx, getNode(node, 'to'));
+  const target = stringValue(targetNode);
   if (!target) {
     push(ctx, 'error', 'edge.target.empty', 'Edge has no target.', node, { node: from });
     return null;
   }
 
   const steps: ConstructionStep[] = [];
-  for (const stepNode of sequenceItems(getNode(node, 'steps'))) {
+  for (const stepNode of sequenceItems(resolveNode(ctx, getNode(node, 'steps')))) {
     const step = parseStep(ctx, stepNode);
     if (step) steps.push(step);
   }
 
   return {
     target,
-    targetSpan: spanOf(getNode(node, 'to'), ctx.lines) ?? span,
+    targetSpan: spanOf(targetNode, ctx.lines) ?? span,
     steps,
     conditions: parseTaggedSeq(ctx, getNode(node, 'conditions'), 'edge conditions'),
     completed: parseTaggedSeq(ctx, getNode(node, 'completed'), 'edge completed'),
@@ -236,7 +269,9 @@ function parseEdge(ctx: ParseContext, node: Node, from: string, index: number): 
   };
 }
 
-function parseNode(ctx: ParseContext, node: Node, index: number): ConstructionNode | null {
+function parseNode(ctx: ParseContext, input: Node, index: number): ConstructionNode | null {
+  const node = resolveNode(ctx, input);
+  if (!node) return null;
   const span = spanOf(node, ctx.lines);
   if (!span) return null;
   if (!isMap(node)) {
@@ -244,7 +279,7 @@ function parseNode(ctx: ParseContext, node: Node, index: number): ConstructionNo
     return null;
   }
 
-  const nameNode = getNode(node, 'node');
+  const nameNode = resolveNode(ctx, getNode(node, 'node'));
   const name = stringValue(nameNode);
   if (!name) {
     push(
@@ -257,12 +292,12 @@ function parseNode(ctx: ParseContext, node: Node, index: number): ConstructionNo
     return null;
   }
 
-  const entityNode = getNode(node, 'entity');
+  const entityNode = resolveNode(ctx, getNode(node, 'entity'));
   const entityScalar = stringValue(entityNode);
   const entityType = entityNode && isMap(entityNode) ? tagType(entityNode.tag) : null;
 
   const edges: ConstructionEdge[] = [];
-  for (const edgeNode of sequenceItems(getNode(node, 'edges'))) {
+  for (const edgeNode of sequenceItems(resolveNode(ctx, getNode(node, 'edges')))) {
     const edge = parseEdge(ctx, edgeNode, name, edges.length);
     if (edge) edges.push(edge);
   }
@@ -291,7 +326,7 @@ function parseGraphPrototype(
   documentIndex: number,
   keySuffix: string,
 ): ConstructionGraph | null {
-  const idNode = getNode(node, 'id');
+  const idNode = resolveNode(ctx, getNode(node, 'id'));
   const id = stringValue(idNode);
   const span = spanOf(node, ctx.lines);
   if (!span) return null;
@@ -301,7 +336,7 @@ function parseGraphPrototype(
     return null;
   }
 
-  const startNode = getNode(node, 'start');
+  const startNode = resolveNode(ctx, getNode(node, 'start'));
   const start = stringValue(startNode) ?? '';
   if (!start) {
     push(ctx, 'error', 'graph.start.missing', `Graph "${id}" has no start node.`, node, {
@@ -309,7 +344,7 @@ function parseGraphPrototype(
     });
   }
 
-  const graphNode = getNode(node, 'graph');
+  const graphNode = resolveNode(ctx, getNode(node, 'graph'));
   if (!graphNode) {
     push(ctx, 'error', 'graph.graph.missing', `Graph "${id}" has no graph list.`, node, {
       node: id,
@@ -364,14 +399,6 @@ export function parseGraphFile(source: string, options: ParseFileOptions): Parse
     source.charCodeAt(0) === 0xfeff ? source.slice(1) : source;
   const lines = new LineIndex(normalizedSource);
   const fileKey = options.fileKey ?? options.filePath;
-  const ctx: ParseContext = {
-    source: normalizedSource,
-    lines,
-    filePath: options.filePath,
-    relativePath: options.relativePath,
-    fileKey,
-    diagnostics: [],
-  };
 
   const result: ParsedGraphFile = {
     filePath: options.filePath,
@@ -409,7 +436,17 @@ export function parseGraphFile(source: string, options: ParseFileOptions): Parse
     });
   }
 
-  const root = document.contents as Node | null;
+  const ctx: ParseContext = {
+    source: normalizedSource,
+    lines,
+    document,
+    filePath: options.filePath,
+    relativePath: options.relativePath,
+    fileKey,
+    diagnostics: [],
+  };
+
+  const root = resolveNode(ctx, document.contents as Node | null);
   const candidates: Node[] = isSeq(root) ? (root.items as Node[]) : root ? [root] : [];
   const seenIDs = new Map<string, number>();
 

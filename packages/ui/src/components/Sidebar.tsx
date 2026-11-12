@@ -254,7 +254,7 @@ export function Sidebar({
             <BookOpen size={13} aria-hidden />
             Docs
           </button>
-          <span>v0.1.0</span>
+          <span>v0.1.1</span>
         </div>
       </footer>
     </aside>

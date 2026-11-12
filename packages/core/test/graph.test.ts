@@ -5,6 +5,7 @@ import {
   applyTextEdits,
   parseGraphFile,
   renderGraphTemplate,
+  validateGraph,
   type ConstructionGraph,
   type GraphOperation,
 } from '../src/index.js';
@@ -78,6 +79,117 @@ describe('construction graph parser', () => {
     expect(graph.stats.materials[0]!.material).toBe('WebSilk');
     expect(graph.stats.materials[0]!.amount).toBeGreaterThan(20);
     expect(graph.stats.maxDepth).toBeGreaterThan(0);
+  });
+});
+
+describe('construction graph validation', () => {
+  it('resolves shared YAML anchors for steps and edges', () => {
+    const source = `- type: constructionGraph
+  id: AliasGraph
+  start: start
+  graph:
+    - node: start
+      edges:
+        - to: frame
+          steps: &build
+            - material: Steel
+              amount: 2
+        - to: frameAlt
+          steps: *build
+    - node: frame
+      entity: Frame
+      edges: &deconstruct
+        - to: start
+          steps:
+            - tool: Prying
+              doAfter: 1
+    - node: frameAlt
+      entity: FrameAlt
+      edges: *deconstruct
+`;
+    const graph = parse(source).graphs[0]!;
+    const start = graph.nodes.find((node) => node.name === 'start')!;
+    const frameAlt = graph.nodes.find((node) => node.name === 'frameAlt')!;
+
+    expect(start.edges[1]!.steps).toHaveLength(1);
+    expect(start.edges[1]!.steps[0]!.fields.material).toBe('Steel');
+    expect(frameAlt.edges).toHaveLength(1);
+    expect(frameAlt.edges[0]!.steps[0]!.fields.tool).toBe('Prying');
+    expect(graph.diagnostics).toEqual([]);
+  });
+
+  it('accepts externally referenced alternate entry nodes', () => {
+    const source = `- type: constructionGraph
+  id: EntryGraph
+  start: start
+  graph:
+    - node: start
+      edges:
+        - to: closed
+          steps:
+            - material: Steel
+              amount: 1
+    - node: closed
+      entity: Closed
+      edges:
+        - to: start
+          steps:
+            - tool: Prying
+    - node: open
+      entity: Open
+      edges:
+        - to: start
+          steps:
+            - tool: Prying
+`;
+    const graph = parse(source).graphs[0]!;
+    expect(graph.diagnostics.some((diagnostic) => diagnostic.code === 'node.unreachable')).toBe(true);
+
+    const diagnostics = validateGraph(graph, { entryNodes: ['open'] });
+    expect(diagnostics.some((diagnostic) => diagnostic.code === 'node.unreachable')).toBe(false);
+    expect(diagnostics.some((diagnostic) => diagnostic.code === 'node.isolated')).toBe(false);
+  });
+
+  it('allows multiple differently-built edges to the same target', () => {
+    const source = `- type: constructionGraph
+  id: BranchGraph
+  start: start
+  graph:
+    - node: start
+      edges:
+        - to: target
+          steps:
+            - material: Steel
+              amount: 1
+        - to: target
+          steps:
+            - material: Glass
+              amount: 1
+    - node: target
+      edges:
+        - to: start
+          steps:
+            - tool: Prying
+`;
+    const graph = parse(source).graphs[0]!;
+    expect(graph.diagnostics.some((diagnostic) => diagnostic.code === 'edge.duplicate')).toBe(false);
+  });
+
+  it('reports in-place edges as info instead of warnings', () => {
+    const source = `- type: constructionGraph
+  id: SelfGraph
+  start: start
+  graph:
+    - node: start
+      edges:
+        - to: start
+          steps:
+            - tool: Screwing
+`;
+    const graph = parse(source).graphs[0]!;
+    const self = graph.diagnostics.find((diagnostic) => diagnostic.code === 'edge.self');
+    expect(self?.severity).toBe('info');
+    expect(graph.diagnostics.filter((diagnostic) => diagnostic.severity !== 'info')).toEqual([]);
   });
 });
 

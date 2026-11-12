@@ -3,6 +3,7 @@ import {
   collectTagUsage,
   mayContainConstructionGraph,
   parseGraphFile,
+  validateGraph,
   type ConstructionGraph,
   type GraphSummary,
   type IndexPayload,
@@ -38,6 +39,13 @@ const EMPTY_PROJECT: ProjectInfo = {
 };
 
 const decoder = new TextDecoder('utf-8');
+
+/**
+ * Entity prototypes point at construction nodes with `Construction.node`, and
+ * crafting recipes point at them with `startNode`. Those are valid alternate
+ * entry points even when they are not reachable from the graph's `start`.
+ */
+const externalNodePattern = /^\s*(node|startNode):\s*['"]?([A-Za-z0-9_.-]+)/gm;
 
 async function mapLimit<T>(
   items: T[],
@@ -174,6 +182,7 @@ export class GraphIndex implements vscode.Disposable {
     let done = 0;
     let lastProgress = 0;
     const parsed: ParsedGraphFile[] = [];
+    const entryNodes = new Set<string>();
 
     report?.(`Scanning ${total} prototype files`);
     this.progressEmitter.fire({
@@ -186,7 +195,12 @@ export class GraphIndex implements vscode.Disposable {
       try {
         const bytes = await vscode.workspace.fs.readFile(uri);
         const text = decoder.decode(bytes);
-        if (mayContainConstructionGraph(text)) {
+        const graphFile = mayContainConstructionGraph(text);
+        for (const match of text.matchAll(externalNodePattern)) {
+          if (graphFile && match[1] !== 'startNode') continue;
+          entryNodes.add(match[2]!);
+        }
+        if (graphFile) {
           parsed.push(this.parseText(uri, text));
         }
       } catch (error) {
@@ -217,6 +231,10 @@ export class GraphIndex implements vscode.Disposable {
         }
       }
       graphs.push(...file.graphs);
+    }
+
+    for (const graph of graphs) {
+      graph.diagnostics = validateGraph(graph, { entryNodes });
     }
 
     const fileGraphMap = new Map<string, string[]>();
