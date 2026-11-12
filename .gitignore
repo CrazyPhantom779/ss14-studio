@@ -1,0 +1,14 @@
+node_modules/
+dist/
+out/
+releases/
+*.vsix
+*.tsbuildinfo
+.DS_Store
+Thumbs.db
+.vite/
+coverage/
+.tmp/
+apps/vscode/media/webview/
+apps/vscode/dist/
+packages/*/dist/

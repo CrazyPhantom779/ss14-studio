@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <linearGradient id="panel-bg" x1="8" y1="4" x2="58" y2="62" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#12222f"/>
+      <stop offset="1" stop-color="#071018"/>
+    </linearGradient>
+    <linearGradient id="panel-line" x1="18" y1="22" x2="48" y2="45" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#67e8f9"/>
+      <stop offset="1" stop-color="#22d3ee"/>
+    </linearGradient>
+    <linearGradient id="panel-violet" x1="18" y1="42" x2="46" y2="20" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#a78bfa"/>
+      <stop offset="1" stop-color="#8b5cf6"/>
+    </linearGradient>
+    <filter id="panel-glow" x="-14" y="-14" width="92" height="92" filterUnits="userSpaceOnUse">
+      <feGaussianBlur stdDeviation="2.2" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#panel-bg)"/>
+  <rect x="0.75" y="0.75" width="62.5" height="62.5" rx="13.25" stroke="#22d3ee" stroke-opacity=".22" stroke-width="1.5"/>
+  <path d="M32 8.5 51.8 19.9v22.2L32 53.5 12.2 42.1V19.9L32 8.5Z" fill="#22d3ee" fill-opacity=".045" stroke="#22d3ee" stroke-opacity=".75" stroke-width="1.4"/>
+  <path d="M21.5 41.5 32 24l10.5 17.5M21.5 41.5h21M32 24v17.5" stroke="url(#panel-line)" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" filter="url(#panel-glow)"/>
+  <circle cx="32" cy="24" r="4" fill="#22d3ee" filter="url(#panel-glow)"/>
+  <circle cx="21.5" cy="41.5" r="3.2" fill="url(#panel-violet)" stroke="#0b1118" stroke-width="1.2"/>
+  <circle cx="42.5" cy="41.5" r="3.2" fill="url(#panel-violet)" stroke="#0b1118" stroke-width="1.2"/>
+  <path d="M8 15V8h7M49 8h7v7M56 49v7h-7M15 56H8v-7" stroke="#67e8f9" stroke-opacity=".38" stroke-width="1.1"/>
+</svg>

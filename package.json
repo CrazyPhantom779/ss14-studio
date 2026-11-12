@@ -1,0 +1,29 @@
+{
+  "name": "ss14-studio",
+  "version": "0.1.0",
+  "private": true,
+  "description": "All-in-one development studio for Space Station 14. Construction graphs first, everything else after.",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "npm run build -w @ss14-studio/core && npm run build -w @ss14-studio/ui && npm run build -w ss14-studio",
+    "build:core": "npm run build -w @ss14-studio/core",
+    "build:ui": "npm run build -w @ss14-studio/ui",
+    "build:extension": "npm run build -w ss14-studio",
+    "typecheck": "npm run typecheck -w @ss14-studio/core && npm run typecheck -w @ss14-studio/ui && npm run typecheck -w ss14-studio",
+    "test": "npm run test -w @ss14-studio/core",
+    "check": "npm run typecheck && npm test",
+    "package": "npm run build && npm run package -w ss14-studio",
+    "install:vsix": "code --install-extension releases/ss14-studio-0.1.0.vsix --force"
+  },
+  "devDependencies": {
+    "@vscode/vsce": "^3.2.1",
+    "tsx": "^4.23.15",
+    "typescript": "^5.7.2"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

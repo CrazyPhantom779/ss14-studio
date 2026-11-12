@@ -1,0 +1,170 @@
+{
+  "name": "ss14-studio",
+  "displayName": "SS14 Studio",
+  "description": "A visual studio for Space Station 14: inspect and edit construction graphs, with more SS14 tooling on the way.",
+  "version": "0.1.0",
+  "publisher": "ss14studio",
+  "license": "MIT",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ss14studio/ss14-studio"
+  },
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Visualization",
+    "Programming Languages",
+    "Other"
+  ],
+  "keywords": [
+    "space station 14",
+    "ss14",
+    "construction graph",
+    "yaml",
+    "robust toolbox",
+    "starlight"
+  ],
+  "main": "./dist/extension.js",
+  "icon": "media/icon.png",
+  "activationEvents": [
+    "onView:ss14Studio.graphs",
+    "onCommand:ss14Studio.openDashboard",
+    "onCommand:ss14Studio.openGraph",
+    "onCommand:ss14Studio.refreshIndex",
+    "onCommand:ss14Studio.createGraph"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "ss14Studio",
+          "title": "SS14 Studio",
+          "icon": "media/studio.svg"
+        }
+      ]
+    },
+    "views": {
+      "ss14Studio": [
+        {
+          "id": "ss14Studio.graphs",
+          "name": "Construction Graphs"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "ss14Studio.graphs",
+        "when": "!ss14Studio.indexing",
+        "contents": "No construction graphs found in this workspace.\n\n[Refresh Index](command:ss14Studio.refreshIndex)\n[Create Construction Graph](command:ss14Studio.createGraph)\n\nOpen an SS14 repository (one containing `Resources/Prototypes`) and SS14 Studio will index every construction graph automatically."
+      }
+    ],
+    "commands": [
+      {
+        "command": "ss14Studio.openDashboard",
+        "title": "SS14 Studio: Open Dashboard",
+        "icon": "$(layout)"
+      },
+      {
+        "command": "ss14Studio.openGraph",
+        "title": "SS14 Studio: Open Construction Graph",
+        "icon": "$(type-hierarchy)"
+      },
+      {
+        "command": "ss14Studio.refreshIndex",
+        "title": "SS14 Studio: Refresh Graph Index",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "ss14Studio.createGraph",
+        "title": "SS14 Studio: Create Construction Graph",
+        "icon": "$(add)"
+      },
+      {
+        "command": "ss14Studio.revealGraphFile",
+        "title": "SS14 Studio: Reveal Graph YAML"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "ss14Studio.createGraph",
+          "when": "view == ss14Studio.graphs",
+          "group": "navigation@1"
+        },
+        {
+          "command": "ss14Studio.openDashboard",
+          "when": "view == ss14Studio.graphs",
+          "group": "navigation@2"
+        },
+        {
+          "command": "ss14Studio.refreshIndex",
+          "when": "view == ss14Studio.graphs",
+          "group": "navigation@3"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "ss14Studio.openGraph",
+          "when": "view == ss14Studio.graphs && viewItem == graph",
+          "group": "inline@1"
+        },
+        {
+          "command": "ss14Studio.revealGraphFile",
+          "when": "view == ss14Studio.graphs && viewItem == graph",
+          "group": "navigation@2"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "SS14 Studio",
+      "properties": {
+        "ss14Studio.graphGlobs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "Resources/Prototypes/**/*.yml",
+            "Resources/Prototypes/**/*.yaml"
+          ],
+          "description": "Glob patterns, relative to each workspace folder, used to find construction graph prototypes."
+        },
+        "ss14Studio.autoRefresh": {
+          "type": "boolean",
+          "default": true,
+          "description": "Update the graph index and open diagrams when prototype YAML files change."
+        },
+        "ss14Studio.animations": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable canvas animations and transitions. Disable for lower-end machines."
+        },
+        "ss14Studio.blueprintIntensity": {
+          "type": "string",
+          "enum": [
+            "subtle",
+            "balanced",
+            "bold"
+          ],
+          "default": "balanced",
+          "description": "How prominent the blueprint grid and glow effects are."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "package": "node -e \"require('node:fs').mkdirSync('../../releases',{recursive:true})\" && vsce package --no-dependencies --out ../../releases/ss14-studio-0.1.0.vsix"
+  },
+  "devDependencies": {
+    "@ss14-studio/core": "*",
+    "@types/node": "^22.10.2",
+    "@types/vscode": "^1.90.0",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.7.2"
+  }
+}
