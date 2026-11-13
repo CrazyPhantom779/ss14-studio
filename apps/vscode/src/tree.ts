@@ -1,5 +1,10 @@
 import * as vscode from 'vscode';
-import type { GraphSummary, IndexPayload } from '@ss14-studio/core';
+import type {
+  GraphSummary,
+  IndexPayload,
+  PrototypeIndexPayload,
+  PrototypeSummary,
+} from '@ss14-studio/core';
 import type { GraphIndex } from './indexer.js';
 
 interface FolderEntry {
@@ -158,6 +163,175 @@ export class GraphTreeProvider
           : summary.warnings > 0
             ? 'editorWarning.foreground'
             : 'charts.blue',
+      ),
+    );
+    return item;
+  }
+
+  dispose(): void {
+    for (const disposable of this.disposables) disposable.dispose();
+    this.changeEmitter.dispose();
+  }
+}
+
+interface PrototypeKindEntry {
+  kind: 'kind';
+  label: string;
+  prototypes: PrototypeEntry[];
+}
+
+interface PrototypeEntry {
+  kind: 'prototype';
+  summary: PrototypeSummary;
+}
+
+interface PrototypeInfoEntry {
+  kind: 'info';
+  label: string;
+}
+
+type PrototypeNode =
+  | PrototypeKindEntry
+  | PrototypeEntry
+  | PrototypeInfoEntry;
+
+export class PrototypeTreeProvider
+  implements vscode.TreeDataProvider<PrototypeNode>, vscode.Disposable
+{
+  private readonly changeEmitter =
+    new vscode.EventEmitter<PrototypeNode | undefined>();
+  readonly onDidChangeTreeData = this.changeEmitter.event;
+
+  private kinds: PrototypeKindEntry[] = [];
+  private readonly disposables: vscode.Disposable[] = [];
+  private indexing = false;
+
+  constructor(private readonly index: GraphIndex) {
+    this.disposables.push(
+      index.onDidPrototypesChange((payload) => this.apply(payload)),
+    );
+    this.apply(index.getPrototypePayload());
+  }
+
+  private apply(payload: PrototypeIndexPayload): void {
+    const byKind = new Map<string, PrototypeEntry[]>();
+    for (const summary of payload.summaries) {
+      const list = byKind.get(summary.kind) ?? [];
+      list.push({ kind: 'prototype', summary });
+      byKind.set(summary.kind, list);
+    }
+    this.kinds = [...byKind.entries()]
+      .map(([kind, prototypes]) => ({
+        kind: 'kind' as const,
+        label: kind,
+        prototypes: prototypes.sort((a, b) =>
+          a.summary.id.localeCompare(b.summary.id),
+        ),
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+    this.changeEmitter.fire(undefined);
+  }
+
+  setIndexing(indexing: boolean): void {
+    this.indexing = indexing;
+    this.changeEmitter.fire(undefined);
+  }
+
+  getChildren(element?: PrototypeNode): PrototypeNode[] {
+    if (!element) {
+      if (this.kinds.length === 0 && this.indexing) {
+        return [{ kind: 'info', label: 'Indexing prototypes…' }];
+      }
+      return this.kinds;
+    }
+    if (element.kind === 'kind') return element.prototypes;
+    return [];
+  }
+
+  getParent(element: PrototypeNode): PrototypeNode | undefined {
+    if (element.kind === 'prototype') {
+      return this.kinds.find((kind) =>
+        kind.prototypes.some(
+          (prototype) => prototype.summary.key === element.summary.key,
+        ),
+      );
+    }
+    return undefined;
+  }
+
+  getTreeItem(element: PrototypeNode): vscode.TreeItem {
+    if (element.kind === 'info') {
+      const item = new vscode.TreeItem(
+        element.label,
+        vscode.TreeItemCollapsibleState.None,
+      );
+      item.iconPath = new vscode.ThemeIcon('sync~spin');
+      return item;
+    }
+
+    if (element.kind === 'kind') {
+      const item = new vscode.TreeItem(
+        element.label,
+        vscode.TreeItemCollapsibleState.Collapsed,
+      );
+      item.description = `${element.prototypes.length}`;
+      item.tooltip = `${element.prototypes.length} ${element.label} prototype${
+        element.prototypes.length === 1 ? '' : 's'
+      }`;
+      item.iconPath = new vscode.ThemeIcon('symbol-class');
+      item.contextValue = 'prototypeKind';
+      item.id = `prototype-kind:${element.label}`;
+      return item;
+    }
+
+    const summary = element.summary;
+    const item = new vscode.TreeItem(
+      summary.id,
+      vscode.TreeItemCollapsibleState.None,
+    );
+    const parts: string[] = [];
+    if (summary.partial) parts.push('partial');
+    if (summary.abstract) parts.push('abstract');
+    if (summary.parents.length > 0) {
+      parts.push(`? ${summary.parents.join(', ')}`);
+    }
+    if (summary.children > 0) {
+      parts.push(`${summary.children} children`);
+    }
+    item.description = parts.join(' · ');
+    item.tooltip = new vscode.MarkdownString(
+      [
+        `**${summary.id}**`,
+        '',
+        `\`${summary.relativePath}\` · line ${summary.line}`,
+        '',
+        `${summary.kind} · ${summary.componentCount} components`,
+        summary.parents.length > 0
+          ? `Parents: ${summary.parents.join(', ')}`
+          : '',
+        summary.partial ? 'Partial prototype overlay' : '',
+        '',
+        'Click to open the prototype inspector.',
+      ]
+        .filter(Boolean)
+        .join('\n'),
+    );
+    item.id = `prototype:${summary.key}`;
+    item.contextValue = 'prototype';
+    item.resourceUri = vscode.Uri.parse(summary.filePath);
+    item.command = {
+      command: 'ss14Studio.openPrototype',
+      title: 'Open Prototype',
+      arguments: [summary.id, summary.kind],
+    };
+    item.iconPath = new vscode.ThemeIcon(
+      summary.partial
+        ? 'layers'
+        : summary.abstract
+          ? 'symbol-interface'
+          : 'symbol-class',
+      new vscode.ThemeColor(
+        summary.partial ? 'editorWarning.foreground' : 'charts.purple',
       ),
     );
     return item;

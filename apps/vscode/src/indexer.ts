@@ -2,7 +2,10 @@ import * as vscode from 'vscode';
 import {
   collectTagUsage,
   mayContainConstructionGraph,
+  parseFluent,
   parseGraphFile,
+  parsePrototypeFile,
+  PrototypeRegistry,
   validateGraph,
   type ConstructionGraph,
   type GraphSummary,
@@ -10,6 +13,11 @@ import {
   type ParsedGraphFile,
   type ProjectInfo,
   type ProjectRootInfo,
+  type PrototypeIndexPayload,
+  type PrototypeSummary,
+  type PrototypeView,
+  type RawPrototype,
+  type SpriteInfo,
   type TagUsage,
 } from '@ss14-studio/core';
 
@@ -25,6 +33,25 @@ export interface IndexProgress {
   done: number;
   total: number;
 }
+
+interface PartialDeclaration {
+  /** Path relative to the workspace root, e.g. Resources/Prototypes/_Fork/Partials. */
+  path: string;
+  index: number;
+  file: boolean;
+}
+
+const EMPTY_PROTOTYPES: PrototypeIndexPayload = {
+  summaries: [],
+  kinds: [],
+  total: 0,
+  errors: 0,
+  warnings: 0,
+  duplicates: 0,
+  localizationCount: 0,
+  partialFiles: [],
+  scanDurationMs: 0,
+};
 
 const EMPTY_PROJECT: ProjectInfo = {
   roots: [],
@@ -73,6 +100,9 @@ export class GraphIndex implements vscode.Disposable {
   private readonly progressEmitter = new vscode.EventEmitter<IndexProgress>();
   readonly onProgress = this.progressEmitter.event;
 
+  private readonly prototypeEmitter = new vscode.EventEmitter<PrototypeIndexPayload>();
+  readonly onDidPrototypesChange = this.prototypeEmitter.event;
+
   private readonly graphs = new Map<string, ConstructionGraph>();
   private readonly summaries = new Map<string, GraphSummary>();
   private readonly fileGraphs = new Map<string, string[]>();
@@ -84,15 +114,29 @@ export class GraphIndex implements vscode.Disposable {
     project: EMPTY_PROJECT,
     knownTags: [],
   };
+  private prototypes: PrototypeIndexPayload = EMPTY_PROTOTYPES;
+  private prototypeRecords: RawPrototype[] = [];
+  private prototypeFileRecords = new Map<string, RawPrototype[]>();
+  private localization = new Map<string, string>();
+  private localizationFiles = new Map<string, string>();
+  private partialDeclarations: PartialDeclaration[] = [];
+  private registry: PrototypeRegistry | null = null;
   private roots: Root[] = [];
   private watcher: vscode.FileSystemWatcher | undefined;
+  private localeWatcher: vscode.FileSystemWatcher | undefined;
   private disposables: vscode.Disposable[] = [];
   private refreshPromise: Promise<void> | undefined;
   private refreshAgain = false;
   private generation = 0;
+  private readonly pendingLocales = new Map<string, NodeJS.Timeout>();
 
   constructor(private readonly context: vscode.ExtensionContext) {
-    this.disposables.push(this.output, this.changeEmitter, this.progressEmitter);
+    this.disposables.push(
+      this.output,
+      this.changeEmitter,
+      this.progressEmitter,
+      this.prototypeEmitter,
+    );
     this.installWatcher();
     this.disposables.push(
       vscode.workspace.onDidChangeWorkspaceFolders(() => {
@@ -115,6 +159,131 @@ export class GraphIndex implements vscode.Disposable {
 
   getRoots(): ProjectRootInfo[] {
     return this.payload.project.roots;
+  }
+
+  getPrototypePayload(): PrototypeIndexPayload {
+    return this.prototypes;
+  }
+
+  getPrototypeView(id: string, kind?: string): PrototypeView | null {
+    this.ensureRegistry();
+    return this.registry?.view(id, kind) ?? null;
+  }
+
+  getPrototypeSummary(id: string, kind?: string): PrototypeSummary | null {
+    this.ensureRegistry();
+    return this.registry?.summary(id, kind) ?? null;
+  }
+
+  findPrototypeByFile(uri: vscode.Uri): PrototypeView | null {
+    this.ensureRegistry();
+    const records = this.prototypeFileRecords.get(uri.toString()) ?? [];
+    const record =
+      records.find((candidate) => !candidate.abstract) ?? records[0];
+    return record ? this.registry?.view(record.id, record.kind) ?? null : null;
+  }
+
+  findPrototypeBySource(
+    uri: vscode.Uri,
+    text: string,
+  ): PrototypeView | null {
+    const parsed = this.parsePrototypeText(uri, text);
+    const record = parsed.prototypes.find((candidate) => !candidate.abstract) ?? parsed.prototypes[0];
+    if (!record) return null;
+    this.ensureRegistry();
+    return this.registry?.view(record.id, record.kind) ?? null;
+  }
+
+  /**
+   * Resolve a prototype using the editor's current (possibly unsaved) text.
+   * The rest of the workspace still comes from the index, so inheritance and
+   * partial overlays remain accurate while a file is being edited.
+   */
+  getPrototypeViewForSource(
+    uri: vscode.Uri,
+    text: string,
+    id?: string,
+    kind?: string,
+  ): PrototypeView | null {
+    const parsed = this.parsePrototypeText(uri, text);
+    const record =
+      (id
+        ? parsed.prototypes.find(
+            (candidate) =>
+              candidate.id === id && (kind == null || candidate.kind === kind),
+          )
+        : undefined) ??
+      parsed.prototypes.find((candidate) => !candidate.abstract) ??
+      parsed.prototypes[0];
+    if (!record) return null;
+    const key = uri.toString();
+    const records = this.prototypeRecords.filter((candidate) => candidate.filePath !== key);
+    records.push(...parsed.prototypes);
+    const registry = new PrototypeRegistry(records, this.localization);
+    return registry.view(record.id, record.kind);
+  }
+
+  getEntitySprite(entityId: string): SpriteInfo | null {
+    this.ensureRegistry();
+    return this.registry?.resolve(entityId)?.sprite ?? null;
+  }
+
+  resolveResourceUri(resourcePath: string): vscode.Uri | undefined {
+    const normalized = resourcePath
+      .replace(/\\/g, '/')
+      .replace(/^\/+/, '')
+      .replace(/^Resources\//, '');
+    const relative = normalized.startsWith('Textures/')
+      ? normalized
+      : `Textures/${normalized}`;
+    for (const root of this.roots) {
+      return vscode.Uri.joinPath(root.uri, 'Resources', relative);
+    }
+    const folder = vscode.workspace.workspaceFolders?.[0];
+    return folder
+      ? vscode.Uri.joinPath(folder.uri, 'Resources', relative)
+      : undefined;
+  }
+
+  resolveWorkspaceUri(relativeOrAbsolute: string): vscode.Uri | undefined {
+    if (/^[a-zA-Z]+:/.test(relativeOrAbsolute)) {
+      return vscode.Uri.parse(relativeOrAbsolute);
+    }
+    const root = this.roots[0] ?? vscode.workspace.workspaceFolders?.[0];
+    if (!root) return undefined;
+    const rootUri = 'uri' in root ? root.uri : root;
+    return vscode.Uri.joinPath(rootUri, relativeOrAbsolute);
+  }
+
+  parsePrototypeText(uri: vscode.Uri, text: string): ReturnType<typeof parsePrototypeFile> {
+    const relative = this.relativePath(uri);
+    const partial = this.partialFor(relative);
+    return parsePrototypeFile(text, {
+      filePath: uri.toString(),
+      relativePath: relative,
+      isPartial: partial != null,
+      partialIndex: partial?.index,
+    });
+  }
+
+  private ensureRegistry(): void {
+    if (this.registry) return;
+    this.registry = new PrototypeRegistry(this.prototypeRecords, this.localization);
+  }
+
+  private partialFor(relativePath: string): PartialDeclaration | null {
+    const normalized = relativePath.replace(/\\/g, '/');
+    for (const declaration of this.partialDeclarations) {
+      if (declaration.file) {
+        if (normalized === declaration.path) return declaration;
+      } else if (
+        normalized === declaration.path ||
+        normalized.startsWith(`${declaration.path}/`)
+      ) {
+        return declaration;
+      }
+    }
+    return null;
   }
 
   parseText(uri: vscode.Uri, text: string): ParsedGraphFile {
@@ -174,21 +343,40 @@ export class GraphIndex implements vscode.Disposable {
 
     if (folders.length === 0) {
       this.replaceData([], [], new Map(), started, 0);
+      this.replacePrototypeData([], new Map(), started);
       return;
     }
 
-    const uris = await this.findPrototypeFiles();
+    this.partialDeclarations = await this.findPartialDeclarations();
+    const [uris, localeUris] = await Promise.all([
+      this.findPrototypeFiles(),
+      this.findLocaleFiles(),
+    ]);
     const total = uris.length;
     let done = 0;
     let lastProgress = 0;
     const parsed: ParsedGraphFile[] = [];
     const entryNodes = new Set<string>();
+    const prototypeFiles = new Map<string, RawPrototype[]>();
+    const prototypeRecords: RawPrototype[] = [];
 
     report?.(`Scanning ${total} prototype files`);
     this.progressEmitter.fire({
       message: 'Scanning prototype files',
       done: 0,
       total,
+    });
+
+    const localeEntries = new Map<string, string>();
+    await mapLimit(localeUris, 8, async (uri) => {
+      try {
+        const bytes = await vscode.workspace.fs.readFile(uri);
+        for (const entry of parseFluent(decoder.decode(bytes), uri.toString())) {
+          if (!localeEntries.has(entry.id)) localeEntries.set(entry.id, entry.value);
+        }
+      } catch (error) {
+        this.output.appendLine(`Could not read locale ${uri.toString()}: ${String(error)}`);
+      }
     });
 
     await mapLimit(uris, 8, async (uri) => {
@@ -202,6 +390,18 @@ export class GraphIndex implements vscode.Disposable {
         }
         if (graphFile) {
           parsed.push(this.parseText(uri, text));
+        }
+        if (this.roots.some((root) => this.isInside(uri, root.uri))) {
+          const prototypes = this.parsePrototypeText(uri, text);
+          if (prototypes.prototypes.length > 0) {
+            prototypeFiles.set(uri.toString(), prototypes.prototypes);
+            prototypeRecords.push(...prototypes.prototypes);
+          }
+          for (const diagnostic of prototypes.diagnostics.slice(0, 3)) {
+            this.output.appendLine(
+              `${prototypes.relativePath}:${diagnostic.line} [${diagnostic.code}] ${diagnostic.message}`,
+            );
+          }
         }
       } catch (error) {
         this.output.appendLine(`Could not read ${uri.toString()}: ${String(error)}`);
@@ -245,7 +445,114 @@ export class GraphIndex implements vscode.Disposable {
       );
     }
 
+    this.localization = localeEntries;
+    this.localizationFiles = new Map(
+      localeUris.map((uri) => [uri.toString(), uri.toString()]),
+    );
     this.replaceData(graphs, parsed, fileGraphMap, started, total, generation);
+    if (generation === this.generation) {
+      this.replacePrototypeData(
+        prototypeRecords,
+        prototypeFiles,
+        started,
+        this.partialDeclarations.map((declaration) =>
+          declaration.file
+            ? declaration.path
+            : `${declaration.path} (${declaration.index})`,
+        ),
+      );
+    }
+  }
+
+  private async findLocaleFiles(): Promise<vscode.Uri[]> {
+    const result: vscode.Uri[] = [];
+    const seen = new Set<string>();
+    for (const root of this.roots.length > 0
+      ? this.roots
+      : (vscode.workspace.workspaceFolders ?? []).map((folder) => ({
+          uri: folder.uri,
+          name: folder.name,
+          relativeName: folder.name,
+          isSs14: false,
+        }))) {
+      try {
+        const matches = await vscode.workspace.findFiles(
+          new vscode.RelativePattern(root.uri, 'Resources/Locale/**/*.ftl'),
+          '**/{node_modules,.git,bin,obj,Library,Temp,.vs,.idea,dist,out}/**',
+          20000,
+        );
+        for (const uri of matches) {
+          if (seen.has(uri.toString())) continue;
+          seen.add(uri.toString());
+          result.push(uri);
+        }
+      } catch (error) {
+        this.output.appendLine(`Locale glob failed: ${String(error)}`);
+      }
+    }
+    return result;
+  }
+
+  private async findPartialDeclarations(): Promise<PartialDeclaration[]> {
+    const declarations: PartialDeclaration[] = [];
+    let index = 0;
+    for (const root of this.roots) {
+      let entries: [string, vscode.FileType][];
+      try {
+        entries = await vscode.workspace.fs.readDirectory(
+          vscode.Uri.joinPath(root.uri, 'Resources', 'PartialPrototypes'),
+        );
+      } catch {
+        continue;
+      }
+      entries.sort((a, b) => a[0].localeCompare(b[0]));
+      for (const [name, type] of entries) {
+        if ((type & vscode.FileType.File) === 0 || !/\.ya?ml$/i.test(name)) continue;
+        const uri = vscode.Uri.joinPath(
+          root.uri,
+          'Resources',
+          'PartialPrototypes',
+          name,
+        );
+        try {
+          const text = decoder.decode(await vscode.workspace.fs.readFile(uri));
+          for (const line of text.split(/\r?\n/)) {
+            const match = /^\s*-\s*(\/[^\s#]+)/.exec(line);
+            if (!match) continue;
+            declarations.push({
+              path: `Resources${match[1]}`.replace(/\/+$/, ''),
+              index: index++,
+              file: /\.ya?ml$/i.test(match[1]!),
+            });
+          }
+        } catch (error) {
+          this.output.appendLine(`Could not read partial manifest ${name}: ${String(error)}`);
+        }
+      }
+    }
+    return declarations;
+  }
+
+  private replacePrototypeData(
+    records: RawPrototype[],
+    files: Map<string, RawPrototype[]>,
+    started: number,
+    partialFiles: string[] = [],
+  ): void {
+    this.prototypeRecords = records;
+    this.prototypeFileRecords = files;
+    this.registry = new PrototypeRegistry(records, this.localization);
+    this.prototypes = this.registry.indexPayload(partialFiles, Date.now() - started);
+    this.prototypeEmitter.fire(this.prototypes);
+  }
+
+  private rebuildPrototypeData(): void {
+    this.registry = new PrototypeRegistry(this.prototypeRecords, this.localization);
+    this.prototypes = this.registry.indexPayload(
+      this.partialDeclarations.map((declaration) => declaration.path),
+      this.prototypes.scanDurationMs,
+    );
+    this.prototypeEmitter.fire(this.prototypes);
   }
 
   private async findPrototypeFiles(): Promise<vscode.Uri[]> {
@@ -430,13 +737,49 @@ export class GraphIndex implements vscode.Disposable {
 
   private installWatcher(): void {
     this.watcher?.dispose();
+    this.localeWatcher?.dispose();
     this.watcher = vscode.workspace.createFileSystemWatcher('**/*.{yml,yaml}');
+    this.localeWatcher = vscode.workspace.createFileSystemWatcher('**/*.ftl');
     this.disposables.push(
       this.watcher,
       this.watcher.onDidChange((uri) => this.scheduleFileUpdate(uri)),
       this.watcher.onDidCreate((uri) => this.scheduleFileUpdate(uri)),
       this.watcher.onDidDelete((uri) => this.scheduleFileUpdate(uri)),
+      this.localeWatcher,
+      this.localeWatcher.onDidChange((uri) => this.scheduleLocaleUpdate(uri)),
+      this.localeWatcher.onDidCreate((uri) => this.scheduleLocaleUpdate(uri)),
+      this.localeWatcher.onDidDelete((uri) => this.scheduleLocaleUpdate(uri)),
     );
+  }
+
+  private scheduleLocaleUpdate(uri: vscode.Uri): void {
+    if (!vscode.workspace.getConfiguration('ss14Studio').get<boolean>('autoRefresh', true)) {
+      return;
+    }
+    const key = uri.toString();
+    const existing = this.pendingLocales.get(key);
+    if (existing) clearTimeout(existing);
+    this.pendingLocales.set(
+      key,
+      setTimeout(() => {
+        this.pendingLocales.delete(key);
+        void this.updateLocale(uri);
+      }, 250),
+    );
+  }
+
+  private async updateLocale(uri: vscode.Uri): Promise<void> {
+    try {
+      const bytes = await vscode.workspace.fs.readFile(uri);
+      for (const entry of parseFluent(decoder.decode(bytes), uri.toString())) {
+        if (!this.localization.has(entry.id)) this.localization.set(entry.id, entry.value);
+      }
+    } catch {
+      // Deletions are handled by a full refresh; keeping the old values is
+      // preferable to dropping every localized name after one save.
+    }
+    this.localizationFiles.set(uri.toString(), uri.toString());
+    this.rebuildPrototypeData();
   }
 
   private scheduleFileUpdate(uri: vscode.Uri): void {
@@ -460,15 +803,31 @@ export class GraphIndex implements vscode.Disposable {
 
     const fileKey = uri.toString();
     let parsed: ParsedGraphFile | undefined;
+    let prototypeRecords: RawPrototype[] = [];
     try {
       const bytes = await vscode.workspace.fs.readFile(uri);
       const text = decoder.decode(bytes);
       if (mayContainConstructionGraph(text)) {
         parsed = this.parseText(uri, text);
       }
+      const prototypes = this.parsePrototypeText(uri, text);
+      prototypeRecords = prototypes.prototypes;
     } catch {
       parsed = undefined;
     }
+
+    const previousPrototypes = this.prototypeFileRecords.get(fileKey) ?? [];
+    if (previousPrototypes.length > 0) {
+      const previous = new Set(previousPrototypes);
+      this.prototypeRecords = this.prototypeRecords.filter((record) => !previous.has(record));
+    }
+    if (prototypeRecords.length > 0) {
+      this.prototypeFileRecords.set(fileKey, prototypeRecords);
+      this.prototypeRecords.push(...prototypeRecords);
+    } else {
+      this.prototypeFileRecords.delete(fileKey);
+    }
+    this.rebuildPrototypeData();
 
     const removed = this.fileGraphs.get(fileKey) ?? [];
     for (const key of removed) {
@@ -533,6 +892,8 @@ export class GraphIndex implements vscode.Disposable {
   dispose(): void {
     for (const timer of this.pendingFiles.values()) clearTimeout(timer);
     this.pendingFiles.clear();
+    for (const timer of this.pendingLocales.values()) clearTimeout(timer);
+    this.pendingLocales.clear();
     for (const disposable of this.disposables) disposable.dispose();
     this.disposables = [];
   }

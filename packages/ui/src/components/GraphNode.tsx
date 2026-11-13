@@ -1,5 +1,5 @@
 import type { CSSProperties } from 'react';
-import type { ConstructionNode, Diagnostic } from '@ss14-studio/core';
+import type { ConstructionNode, Diagnostic, StudioConfig } from '@ss14-studio/core';
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react';
 import { CircleAlert, Flag, GitBranch, ListChecks, TriangleAlert } from 'lucide-react';
 import {
@@ -7,6 +7,7 @@ import {
   initialsFor,
   nodeAccent,
 } from '../lib/graph';
+import { SpriteFrame, type SpriteFrameSource } from './SpritePreview';
 
 export type StudioNodeData = {
   model: ConstructionNode;
@@ -17,15 +18,44 @@ export type StudioNodeData = {
   conditions: number;
   dimmed: boolean;
   highlighted: boolean;
+  sprite: SpriteFrameSource | null;
+  config: StudioConfig;
 };
 
 export type StudioGraphNode = Node<StudioNodeData, 'studio'>;
 
+function accentFor(model: ConstructionNode, isStart: boolean, mode: StudioConfig['graphNodeAccent']) {
+  if (mode === 'mono') {
+    return {
+      hue: 192,
+      color: 'hsl(192 48% 64%)',
+      soft: 'hsl(192 48% 64% / 0.14)',
+      gradient: 'linear-gradient(135deg, hsl(192 48% 58%) 0%, hsl(212 46% 48%) 100%)',
+    };
+  }
+  if (mode === 'kind') {
+    return nodeAccent(model.entity ? `kind:${model.entity}` : `kind:${model.name}`, isStart);
+  }
+  return nodeAccent(model.name, isStart);
+}
+
 export function GraphNode({ data, selected }: NodeProps<StudioGraphNode>) {
-  const { model, isStart, diagnostics, incoming, steps, conditions, dimmed, highlighted } = data;
-  const accent = nodeAccent(model.name, isStart);
+  const {
+    model,
+    isStart,
+    diagnostics,
+    incoming,
+    steps,
+    conditions,
+    dimmed,
+    highlighted,
+    sprite,
+    config,
+  } = data;
+  const accent = accentFor(model, isStart, config.graphNodeAccent);
   const severity = highestSeverity(diagnostics);
   const initials = initialsFor(model.entity ?? model.name);
+  const showSprite = Boolean(sprite && config.graphSprites);
 
   return (
     <div
@@ -36,6 +66,8 @@ export function GraphNode({ data, selected }: NodeProps<StudioGraphNode>) {
         dimmed ? 'is-dimmed' : '',
         highlighted ? 'is-highlighted' : '',
         severity ? `has-${severity}` : '',
+        config.graphCompact ? 'is-compact' : '',
+        showSprite ? 'has-sprite' : '',
       ]
         .filter(Boolean)
         .join(' ')}
@@ -58,14 +90,22 @@ export function GraphNode({ data, selected }: NodeProps<StudioGraphNode>) {
       <Handle type="source" position={Position.Right} className="studio-handle" />
 
       <header className="node-head">
-        <span className="node-glyph" style={{ background: accent.gradient }}>
-          {isStart ? <Flag size={14} aria-hidden /> : <span>{initials}</span>}
+        <span className={`node-glyph ${showSprite ? 'with-sprite' : ''}`} style={{ background: accent.gradient }}>
+          {showSprite && sprite ? (
+            <SpriteFrame sheet={sprite} size={config.graphCompact ? 24 : 30} title={model.entity ?? model.name} />
+          ) : isStart ? (
+            <Flag size={14} aria-hidden />
+          ) : (
+            <span>{initials}</span>
+          )}
         </span>
         <div className="node-heading">
           <span className="node-name">{model.name}</span>
-          <span className="node-entity" title={model.entity ?? 'Inherited entity'}>
-            {model.entity ?? 'inherited entity'}
-          </span>
+          {config.graphEntityIds && !config.graphCompact ? (
+            <span className="node-entity" title={model.entity ?? 'Inherited entity'}>
+              {model.entity ?? 'inherited entity'}
+            </span>
+          ) : null}
         </div>
         {isStart ? <span className="node-start-badge">START</span> : null}
         {severity ? (
@@ -76,23 +116,33 @@ export function GraphNode({ data, selected }: NodeProps<StudioGraphNode>) {
         ) : null}
       </header>
 
-      <div className="node-chips">
-        <span title="Outgoing edges">
-          <GitBranch size={11} aria-hidden />
-          {model.edges.length}
-        </span>
-        <span title="Construction steps">
-          <ListChecks size={11} aria-hidden />
-          {steps}
-        </span>
-        {conditions > 0 ? <span className="condition-chip">{conditions} cond.</span> : null}
-        {incoming > 0 ? <span className="incoming-chip">{incoming} in</span> : null}
-      </div>
+      {config.graphStats && !config.graphCompact ? (
+        <div className="node-chips">
+          <span title="Outgoing edges">
+            <GitBranch size={11} aria-hidden />
+            {model.edges.length}
+          </span>
+          <span title="Construction steps">
+            <ListChecks size={11} aria-hidden />
+            {steps}
+          </span>
+          {conditions > 0 ? <span className="condition-chip">{conditions} cond.</span> : null}
+          {incoming > 0 ? <span className="incoming-chip">{incoming} in</span> : null}
+        </div>
+      ) : null}
 
-      <footer className="node-foot">
-        {model.actions.length > 0 ? <span>{model.actions.length} action{model.actions.length === 1 ? '' : 's'}</span> : <span>no actions</span>}
-        {model.doNotReplaceInheritingEntities ? <span className="node-lock">fixed entity</span> : null}
-      </footer>
+      {!config.graphCompact ? (
+        <footer className="node-foot">
+          {model.actions.length > 0 ? (
+            <span>
+              {model.actions.length} action{model.actions.length === 1 ? '' : 's'}
+            </span>
+          ) : (
+            <span>no actions</span>
+          )}
+          {model.doNotReplaceInheritingEntities ? <span className="node-lock">fixed entity</span> : null}
+        </footer>
+      ) : null}
     </div>
   );
 }

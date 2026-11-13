@@ -10,6 +10,7 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   size?: 'sm' | 'md';
   icon?: LucideIcon;
   busy?: boolean;
+  active?: boolean;
   children?: ReactNode;
 }
 
@@ -18,6 +19,7 @@ export function Button({
   size = 'md',
   icon: Icon,
   busy = false,
+  active = false,
   className = '',
   disabled,
   children,
@@ -26,7 +28,7 @@ export function Button({
   return (
     <button
       type="button"
-      className={`studio-button ${variant} ${size} ${className}`.trim()}
+      className={`studio-button ${variant} ${size} ${active ? 'active' : ''} ${className}`.trim()}
       disabled={disabled || busy}
       {...rest}
     >
@@ -76,12 +78,18 @@ export function Badge({
   children,
   tone = 'neutral',
   className = '',
+  title,
 }: {
   children: ReactNode;
   tone?: 'neutral' | 'accent' | 'success' | 'warning' | 'danger' | 'muted';
   className?: string;
+  title?: string;
 }) {
-  return <span className={`studio-badge ${tone} ${className}`.trim()}>{children}</span>;
+  return (
+    <span className={`studio-badge ${tone} ${className}`.trim()} title={title}>
+      {children}
+    </span>
+  );
 }
 
 export function Section({

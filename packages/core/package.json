@@ -1,6 +1,6 @@
 {
   "name": "@ss14-studio/core",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "Framework-agnostic parser, validator, editor and graph algorithms for SS14 construction graphs.",

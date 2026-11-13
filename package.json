@@ -1,22 +1,27 @@
 {
   "name": "ss14-studio",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "private": true,
   "description": "All-in-one development studio for Space Station 14. Construction graphs first, everything else after.",
   "workspaces": [
     "packages/*",
-    "apps/*"
+    "apps/*",
+    "apps/rider/sidecar"
   ],
   "scripts": {
     "build": "npm run build -w @ss14-studio/core && npm run build -w @ss14-studio/ui && npm run build -w ss14-studio",
     "build:core": "npm run build -w @ss14-studio/core",
     "build:ui": "npm run build -w @ss14-studio/ui",
     "build:extension": "npm run build -w ss14-studio",
-    "typecheck": "npm run typecheck -w @ss14-studio/core && npm run typecheck -w @ss14-studio/ui && npm run typecheck -w ss14-studio",
+    "build:rider:sidecar": "npm run build -w @ss14-studio/rider-sidecar",
+    "build:rider:web": "node apps/rider/scripts/build-web.mjs",
+    "build:rider": "npm run build:core && npm run build:ui && npm run build:rider:sidecar && npm run build:rider:web",
+    "package:rider": "npm run build:rider && node apps/rider/scripts/package.mjs",
+    "typecheck": "npm run typecheck -w @ss14-studio/core && npm run typecheck -w @ss14-studio/ui && npm run typecheck -w ss14-studio && npm run typecheck -w @ss14-studio/rider-sidecar",
     "test": "npm run test -w @ss14-studio/core",
     "check": "npm run typecheck && npm test",
     "package": "npm run build && npm run package -w ss14-studio",
-    "install:vsix": "code --install-extension releases/ss14-studio-0.1.1.vsix --force"
+    "install:vsix": "code --install-extension releases/ss14-studio-0.2.0.vsix --force"
   },
   "devDependencies": {
     "@vscode/vsce": "^3.2.1",

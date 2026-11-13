@@ -1,0 +1,75 @@
+<idea-plugin>
+  <id>dev.ss14studio.rider</id>
+  <name>SS14 Studio</name>
+  <vendor url="https://github.com/ss14studio/ss14-studio">SS14 Studio</vendor>
+
+  <description><![CDATA[
+    <p><b>SS14 Studio</b> is an all-in-one Space Station 14 development companion for JetBrains Rider.</p>
+    <ul>
+      <li>Interactive construction graph viewer with entity sprites, edge steps, path highlighting, minimap and layout persistence.</li>
+      <li>YAML prototype explorer with inheritance trees, resolved components, value provenance, partial-prototype effects and an approximate in-game inspector card.</li>
+      <li>RobustToolbox XAML tooling: validation, completion, navigation, outline, an approximate visual designer, formatting and before/after diffs.</li>
+      <li>RSI sprite studio: animation playback, directions, frame delays, metadata, PNG import/replace, cleanup and a pixel editor.</li>
+      <li>Diff and merge-conflict review, plus editor actions and a status bar summary.</li>
+    </ul>
+    <p>The plugin keeps Rider's native editors as the default. Studio surfaces open only when you ask for them,
+    through the tool window, editor actions or the status bar.</p>
+    <p><b>AI disclosure:</b> this plugin and its shared web UI were generated with AI assistance and are reviewed
+    by human maintainers. See the AI-GENERATED.md file in the source repository for details.</p>
+    <p><b>Requirements:</b> Node.js 18 or newer on PATH, or configure its location in
+    Settings | Tools | SS14 Studio. The plugin serves its UI over a loopback HTTP server and displays it in JCEF.</p>
+  ]]></description>
+
+  <depends>com.intellij.modules.platform</depends>
+  <depends>com.intellij.modules.lang</depends>
+
+  <extensions defaultExtensionNs="com.intellij">
+    <toolWindow
+        id="SS14 Studio"
+        anchor="right"
+        icon="/icons/ss14studio.svg"
+        factoryClass="dev.ss14studio.rider.StudioToolWindowFactory" />
+
+    <projectService serviceImplementation="dev.ss14studio.rider.Ss14StudioService" />
+    <applicationService serviceImplementation="dev.ss14studio.rider.Ss14StudioSettings" />
+
+    <projectConfigurable
+        id="ss14studio.settings"
+        displayName="SS14 Studio"
+        instance="dev.ss14studio.rider.Ss14StudioConfigurable"
+        groupId="tools" />
+
+    <statusBarWidgetFactory implementation="dev.ss14studio.rider.Ss14StudioStatusWidgetFactory" />
+
+    <postStartupActivity implementation="dev.ss14studio.rider.Ss14StudioStartupActivity" />
+
+    <notificationGroup id="SS14 Studio" displayType="BALLOON" />
+  </extensions>
+
+  <actions>
+    <action
+        id="ss14studio.openDashboard"
+        class="dev.ss14studio.rider.OpenDashboardAction"
+        text="Open SS14 Studio"
+        description="Open the SS14 Studio dashboard">
+      <add-to-group group-id="ToolsMenu" anchor="last" />
+    </action>
+
+    <action
+        id="ss14studio.openCurrentFile"
+        class="dev.ss14studio.rider.OpenCurrentFileAction"
+        text="Open in SS14 Studio"
+        description="Open this YAML, XAML or RSI in SS14 Studio">
+      <add-to-group group-id="EditorPopupMenu" anchor="first" />
+      <add-to-group group-id="ProjectViewPopupMenu" anchor="first" />
+    </action>
+
+    <action
+        id="ss14studio.refresh"
+        class="dev.ss14studio.rider.RefreshStudioAction"
+        text="Refresh SS14 Studio Index"
+        description="Rescan construction graphs, prototypes, locales and sprites">
+      <add-to-group group-id="ToolsMenu" anchor="last" />
+    </action>
+  </actions>
+</idea-plugin>

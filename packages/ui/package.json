@@ -1,6 +1,6 @@
 {
   "name": "@ss14-studio/ui",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "Shared webview UI for SS14 Studio. Runs in VS Code today, JetBrains JCEF later.",

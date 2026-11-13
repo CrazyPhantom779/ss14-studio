@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
   CreateGraphOptions,
+  DiffPayload,
   EditResult,
   GraphOperation,
   GraphView,
@@ -8,7 +9,15 @@ import type {
   IndexPayload,
   LayoutMap,
   PersistedLayout,
+  PrototypeIndexPayload,
+  PrototypeOperation,
+  PrototypeView,
+  RsiOperation,
+  RsiView,
   StudioConfig,
+  WorkspaceView,
+  XamlOperation,
+  XamlView,
 } from '@ss14-studio/core';
 import { post, readUiState, writeUiState } from '../vscode';
 import { ensurePositions } from './layout';
@@ -22,6 +31,15 @@ export interface ToastItem {
   message: string;
 }
 
+export interface IconSheet {
+  uri: string;
+  width: number;
+  height: number;
+  frameWidth: number;
+  frameHeight: number;
+  columns: number;
+}
+
 interface PendingRequest {
   resolve: (result: EditResult) => void;
   timeout: number;
@@ -33,11 +51,32 @@ const DEFAULT_CONFIG: StudioConfig = {
   showGrid: true,
   animations: true,
   blueprintIntensity: 'balanced',
+  graphSprites: true,
+  graphEntityIds: true,
+  graphStats: true,
+  graphEdgeSteps: true,
+  graphMinimap: true,
+  graphLegend: true,
+  graphControls: true,
+  graphPathHighlight: true,
+  graphCompact: false,
+  graphEdgeStyle: 'bezier',
+  graphNodeAccent: 'hash',
+  prototypeCompact: false,
+  prototypeShowResolved: true,
+  autoSidePreview: false,
+  defaultGraphEditor: false,
 };
 
 export interface StudioHost {
   index: IndexPayload | null;
+  prototypes: PrototypeIndexPayload | null;
   graph: GraphView | null;
+  prototype: PrototypeView | null;
+  rsi: RsiView | null;
+  xaml: XamlView | null;
+  diff: DiffPayload | null;
+  view: WorkspaceView;
   positions: LayoutMap;
   readOnly: boolean;
   config: StudioConfig;
@@ -45,15 +84,35 @@ export interface StudioHost {
   openingKey: string | null;
   recent: string[];
   toasts: ToastItem[];
+  icons: Record<string, IconSheet>;
   openGraph: (key: string) => void;
   openDashboard: () => void;
+  openPrototype: (id: string, kind?: string) => void;
+  openRsi: (path: string) => void;
+  openXaml: (path: string) => void;
+  pickRsi: () => void;
+  pickXaml: () => void;
+  openPath: (path: string, line?: number) => void;
+  openAbout: () => void;
   applyOperation: (operation: GraphOperation) => Promise<EditResult>;
+  applyPrototypeOperation: (filePath: string, operation: PrototypeOperation) => Promise<EditResult>;
+  applyRsiOperation: (path: string, operation: RsiOperation) => Promise<EditResult>;
+  applyXamlOperation: (filePath: string, operation: XamlOperation) => Promise<EditResult>;
+  saveRsiPng: (path: string, state: string, dataUrl: string, frameIndex?: number) => Promise<EditResult>;
+  importRsiFrames: (path: string, state: string) => Promise<EditResult>;
+  deleteRsiImage: (path: string, state: string) => Promise<EditResult>;
   createGraph: (options: CreateGraphOptions) => Promise<EditResult>;
   savePositions: (positions: LayoutMap, zoom?: number) => void;
   saveZoom: (zoom: number) => void;
   openSource: (line?: number, node?: string, edgeIndex?: number) => void;
+  openPrototypeSource: (filePath: string, line?: number) => void;
   openFile: (uri: string) => void;
+  openCodeBehind: (filePath: string) => void;
   refreshIndex: () => void;
+  requestDiff: (title: string, oldText: string, newText: string, oldLabel?: string, newLabel?: string) => void;
+  requestIcon: (entityId: string) => void;
+  saveConfig: (config: Partial<StudioConfig>) => void;
+  revealSetting: (setting: string) => void;
   copyText: (text: string) => void;
   openSettings: () => void;
   openDocs: () => void;
@@ -63,7 +122,13 @@ export interface StudioHost {
 
 export function useStudioHost(): StudioHost {
   const [index, setIndex] = useState<IndexPayload | null>(null);
+  const [prototypes, setPrototypes] = useState<PrototypeIndexPayload | null>(null);
   const [graph, setGraph] = useState<GraphView | null>(null);
+  const [prototype, setPrototype] = useState<PrototypeView | null>(null);
+  const [rsi, setRsi] = useState<RsiView | null>(null);
+  const [xaml, setXaml] = useState<XamlView | null>(null);
+  const [diff, setDiff] = useState<DiffPayload | null>(null);
+  const [view, setView] = useState<WorkspaceView>({ kind: 'dashboard' });
   const [positions, setPositions] = useState<LayoutMap>({});
   const [readOnly, setReadOnly] = useState(false);
   const [config, setConfig] = useState<StudioConfig>(DEFAULT_CONFIG);
@@ -71,6 +136,7 @@ export function useStudioHost(): StudioHost {
   const [openingKey, setOpeningKey] = useState<string | null>(null);
   const [recent, setRecent] = useState<string[]>(() => readUiState().recent ?? []);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const [icons, setIcons] = useState<Record<string, IconSheet>>({});
 
   const graphRef = useRef<GraphView | null>(null);
   const positionsRef = useRef<LayoutMap>({});
@@ -80,6 +146,7 @@ export function useStudioHost(): StudioHost {
   const requestIdRef = useRef(0);
   const toastIdRef = useRef(0);
   const notifiedReadyRef = useRef(false);
+  const requestedIconsRef = useRef(new Set<string>());
 
   const dismissToast = useCallback((id: number) => {
     setToasts((current) => current.filter((toast) => toast.id !== id));
@@ -131,12 +198,55 @@ export function useStudioHost(): StudioHost {
           setConfig(message.config);
           break;
 
+        case 'settings':
+          setConfig(message.config);
+          break;
+
         case 'theme':
           setTheme(message.kind);
           break;
 
         case 'index':
           setIndex(message.payload);
+          break;
+
+        case 'prototypes':
+          setPrototypes(message.payload);
+          break;
+
+        case 'prototype':
+          setPrototype(message.view);
+          if (!message.view && message.message) {
+            notifyRef.current('error', message.message);
+          }
+          break;
+
+        case 'rsi':
+          setRsi(message.view);
+          if (!message.view && message.message) {
+            notifyRef.current('error', message.message);
+          }
+          break;
+
+        case 'xaml':
+          setXaml(message.view);
+          if (!message.view && message.message) {
+            notifyRef.current('error', message.message);
+          }
+          break;
+
+        case 'diff':
+          setDiff(message.payload);
+          break;
+
+        case 'view':
+          setView(message.view);
+          if (message.view.kind === 'dashboard') {
+            clearGraph();
+            setPrototype(null);
+            setRsi(null);
+            setXaml(null);
+          }
           break;
 
         case 'graph': {
@@ -199,7 +309,6 @@ export function useStudioHost(): StudioHost {
           break;
 
         case 'editResult':
-          // Older hosts may still answer with editResult; surface failures.
           if (!message.result.ok) {
             notifyRef.current('error', message.result.error ?? 'The edit failed.');
           }
@@ -208,8 +317,29 @@ export function useStudioHost(): StudioHost {
         case 'indexProgress':
           break;
 
-        case 'entityIcon':
+        case 'entityIcon': {
+          if (!message.uri) {
+            setIcons((current) => {
+              const next = { ...current };
+              delete next[message.entityId];
+              return next;
+            });
+            break;
+          }
+          const sheet = message.sheet;
+          setIcons((current) => ({
+            ...current,
+            [message.entityId]: {
+              uri: message.uri!,
+              width: sheet?.width ?? 32,
+              height: sheet?.height ?? 32,
+              frameWidth: sheet?.frameWidth ?? 32,
+              frameHeight: sheet?.frameHeight ?? 32,
+              columns: sheet?.columns ?? 1,
+            },
+          }));
           break;
+        }
 
         default:
           break;
@@ -240,6 +370,34 @@ export function useStudioHost(): StudioHost {
   const openDashboard = useCallback(() => {
     setOpeningKey(null);
     post({ type: 'openDashboard' });
+  }, []);
+
+  const openPrototype = useCallback((id: string, kind?: string) => {
+    post({ type: 'openPrototype', id, kind });
+  }, []);
+
+  const openRsi = useCallback((path: string) => {
+    post({ type: 'openRsi', path });
+  }, []);
+
+  const openXaml = useCallback((path: string) => {
+    post({ type: 'openXaml', path });
+  }, []);
+
+  const pickRsi = useCallback(() => {
+    post({ type: 'pickRsi' });
+  }, []);
+
+  const pickXaml = useCallback(() => {
+    post({ type: 'pickXaml' });
+  }, []);
+
+  const openPath = useCallback((path: string, line?: number) => {
+    post({ type: 'openPath', path, line });
+  }, []);
+
+  const openAbout = useCallback(() => {
+    post({ type: 'openAbout' });
   }, []);
 
   const request = useCallback(
@@ -284,6 +442,60 @@ export function useStudioHost(): StudioHost {
     [request],
   );
 
+  const applyPrototypeOperation = useCallback(
+    (filePath: string, operation: PrototypeOperation) =>
+      request(
+        (requestId) => ({ type: 'applyPrototypeOperation', requestId, filePath, operation }),
+        true,
+      ),
+    [request],
+  );
+
+  const applyRsiOperation = useCallback(
+    (path: string, operation: RsiOperation) =>
+      request(
+        (requestId) => ({ type: 'applyRsiOperation', requestId, path, operation }),
+        true,
+      ),
+    [request],
+  );
+
+  const applyXamlOperation = useCallback(
+    (filePath: string, operation: XamlOperation) =>
+      request(
+        (requestId) => ({ type: 'applyXamlOperation', requestId, filePath, operation }),
+        true,
+      ),
+    [request],
+  );
+
+  const saveRsiPng = useCallback(
+    (path: string, state: string, dataUrl: string, frameIndex?: number) =>
+      request(
+        (requestId) => ({ type: 'saveRsiPng', requestId, path, state, dataUrl, frameIndex }),
+        true,
+      ),
+    [request],
+  );
+
+  const importRsiFrames = useCallback(
+    (path: string, state: string) =>
+      request(
+        (requestId) => ({ type: 'importRsiFrames', requestId, path, state }),
+        true,
+      ),
+    [request],
+  );
+
+  const deleteRsiImage = useCallback(
+    (path: string, state: string) =>
+      request(
+        (requestId) => ({ type: 'deleteRsiImage', requestId, path, state }),
+        true,
+      ),
+    [request],
+  );
+
   const createGraph = useCallback(
     (options: CreateGraphOptions) =>
       request(
@@ -314,12 +526,42 @@ export function useStudioHost(): StudioHost {
     post({ type: 'openSource', key: current.key, line, node, edgeIndex });
   }, []);
 
+  const openPrototypeSource = useCallback((filePath: string, line?: number) => {
+    post({ type: 'openPath', path: filePath, line });
+  }, []);
+
   const openFile = useCallback((uri: string) => {
     post({ type: 'openFile', uri });
   }, []);
 
+  const openCodeBehind = useCallback((filePath: string) => {
+    post({ type: 'openCodeBehind', filePath });
+  }, []);
+
   const refreshIndex = useCallback(() => {
     post({ type: 'refreshIndex' });
+  }, []);
+
+  const requestDiff = useCallback(
+    (title: string, oldText: string, newText: string, oldLabel?: string, newLabel?: string) => {
+      post({ type: 'requestDiff', title, oldText, newText, oldLabel, newLabel });
+    },
+    [],
+  );
+
+  const requestIcon = useCallback((entityId: string) => {
+    if (!entityId || requestedIconsRef.current.has(entityId)) return;
+    requestedIconsRef.current.add(entityId);
+    post({ type: 'requestEntityIcon', entityId });
+  }, []);
+
+  const saveConfig = useCallback((next: Partial<StudioConfig>) => {
+    setConfig((current) => ({ ...current, ...next }));
+    post({ type: 'saveConfig', config: next });
+  }, []);
+
+  const revealSetting = useCallback((setting: string) => {
+    post({ type: 'revealSetting', setting });
   }, []);
 
   const copyText = useCallback((text: string) => {
@@ -345,7 +587,13 @@ export function useStudioHost(): StudioHost {
 
   return {
     index,
+    prototypes,
     graph,
+    prototype,
+    rsi,
+    xaml,
+    diff,
+    view,
     positions,
     readOnly,
     config,
@@ -353,15 +601,35 @@ export function useStudioHost(): StudioHost {
     openingKey,
     recent,
     toasts,
+    icons,
     openGraph,
     openDashboard,
+    openPrototype,
+    openRsi,
+    openXaml,
+    pickRsi,
+    pickXaml,
+    openPath,
+    openAbout,
     applyOperation,
+    applyPrototypeOperation,
+    applyRsiOperation,
+    applyXamlOperation,
+    saveRsiPng,
+    importRsiFrames,
+    deleteRsiImage,
     createGraph,
     savePositions,
     saveZoom,
     openSource,
+    openPrototypeSource,
     openFile,
+    openCodeBehind,
     refreshIndex,
+    requestDiff,
+    requestIcon,
+    saveConfig,
+    revealSetting,
     copyText,
     openSettings,
     openDocs,

@@ -11,4 +11,11 @@ coverage/
 .tmp/
 apps/vscode/media/webview/
 apps/vscode/dist/
+apps/rider/web/assets/
+apps/rider/web/rider.html
+apps/rider/web-files.txt
+apps/rider/sidecar/dist/
+apps/rider/build/
+apps/rider/.gradle/
+apps/rider/.intellijPlatform/
 packages/*/dist/

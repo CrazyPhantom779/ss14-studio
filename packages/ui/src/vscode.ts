@@ -8,6 +8,13 @@ interface VsCodeApi {
 
 declare function acquireVsCodeApi(): VsCodeApi;
 
+declare global {
+  interface Window {
+    /** Injected by the Rider/JCEF host before the UI bundle loads. */
+    ss14StudioBridge?: VsCodeApi;
+  }
+}
+
 const fallback: VsCodeApi = {
   postMessage: (message) => {
     // Browser preview: useful while developing the UI outside VS Code.
@@ -18,10 +25,14 @@ const fallback: VsCodeApi = {
 };
 
 let api: VsCodeApi;
-try {
-  api = acquireVsCodeApi();
-} catch {
-  api = fallback;
+if (typeof window !== 'undefined' && window.ss14StudioBridge) {
+  api = window.ss14StudioBridge;
+} else {
+  try {
+    api = acquireVsCodeApi();
+  } catch {
+    api = fallback;
+  }
 }
 
 export const vscode = api;

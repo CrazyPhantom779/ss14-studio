@@ -1,14 +1,18 @@
 {
   "name": "ss14-studio",
   "displayName": "SS14 Studio",
-  "description": "A visual studio for Space Station 14: inspect and edit construction graphs, with more SS14 tooling on the way.",
-  "version": "0.1.1",
+  "description": "An all-in-one Space Station 14 development studio: construction graphs with sprites, YAML prototype inheritance and partials, RobustToolbox XAML tooling, RSI animation and pixel editing, and diff/merge views.",
+  "version": "0.2.0",
   "publisher": "ss14studio",
   "license": "MIT",
   "private": true,
   "repository": {
     "type": "git",
     "url": "https://github.com/ss14studio/ss14-studio"
+  },
+  "homepage": "https://github.com/ss14studio/ss14-studio#readme",
+  "bugs": {
+    "url": "https://github.com/ss14studio/ss14-studio/issues"
   },
   "engines": {
     "vscode": "^1.90.0"
@@ -23,17 +27,30 @@
     "ss14",
     "construction graph",
     "yaml",
+    "prototype",
     "robust toolbox",
+    "xaml",
+    "rsi",
     "starlight"
   ],
   "main": "./dist/extension.js",
   "icon": "media/icon.png",
+  "galleryBanner": {
+    "color": "#0a1017",
+    "theme": "dark"
+  },
   "activationEvents": [
     "onView:ss14Studio.graphs",
+    "onView:ss14Studio.prototypes",
+    "onLanguage:yaml",
+    "onLanguage:xaml",
     "onCommand:ss14Studio.openDashboard",
     "onCommand:ss14Studio.openGraph",
+    "onCommand:ss14Studio.openPrototype",
+    "onCommand:ss14Studio.openForFile",
     "onCommand:ss14Studio.refreshIndex",
-    "onCommand:ss14Studio.createGraph"
+    "onCommand:ss14Studio.createGraph",
+    "onCommand:ss14Studio.openAbout"
   ],
   "contributes": {
     "viewsContainers": {
@@ -50,6 +67,10 @@
         {
           "id": "ss14Studio.graphs",
           "name": "Construction Graphs"
+        },
+        {
+          "id": "ss14Studio.prototypes",
+          "name": "Prototypes"
         }
       ]
     },
@@ -58,6 +79,11 @@
         "view": "ss14Studio.graphs",
         "when": "!ss14Studio.indexing",
         "contents": "No construction graphs found in this workspace.\n\n[Refresh Index](command:ss14Studio.refreshIndex)\n[Create Construction Graph](command:ss14Studio.createGraph)\n\nOpen an SS14 repository (one containing `Resources/Prototypes`) and SS14 Studio will index every construction graph automatically."
+      },
+      {
+        "view": "ss14Studio.prototypes",
+        "when": "!ss14Studio.indexing",
+        "contents": "No prototypes found in this workspace.\n\n[Refresh Index](command:ss14Studio.refreshIndex)\n[Open Dashboard](command:ss14Studio.openDashboard)\n\nPrototype indexing discovers YAML inheritance, Fluent localization and partial prototype overlays."
       }
     ],
     "commands": [
@@ -72,8 +98,53 @@
         "icon": "$(type-hierarchy)"
       },
       {
+        "command": "ss14Studio.openGraphForFile",
+        "title": "SS14 Studio: Open Graph for This File",
+        "icon": "$(type-hierarchy)"
+      },
+      {
+        "command": "ss14Studio.openPrototype",
+        "title": "SS14 Studio: Open Prototype",
+        "icon": "$(symbol-class)"
+      },
+      {
+        "command": "ss14Studio.openPrototypeForFile",
+        "title": "SS14 Studio: Open Prototype for This File",
+        "icon": "$(symbol-class)"
+      },
+      {
+        "command": "ss14Studio.openRsi",
+        "title": "SS14 Studio: Open RSI Sprite",
+        "icon": "$(symbol-color)"
+      },
+      {
+        "command": "ss14Studio.openRsiForFile",
+        "title": "SS14 Studio: Open RSI for This File",
+        "icon": "$(symbol-color)"
+      },
+      {
+        "command": "ss14Studio.openXaml",
+        "title": "SS14 Studio: Open XAML",
+        "icon": "$(preview)"
+      },
+      {
+        "command": "ss14Studio.openXamlForFile",
+        "title": "SS14 Studio: Open XAML for This File",
+        "icon": "$(preview)"
+      },
+      {
+        "command": "ss14Studio.openXamlPath",
+        "title": "SS14 Studio: Open XAML Path",
+        "icon": "$(preview)"
+      },
+      {
+        "command": "ss14Studio.openForFile",
+        "title": "SS14 Studio: Open in SS14 Studio",
+        "icon": "$(type-hierarchy)"
+      },
+      {
         "command": "ss14Studio.refreshIndex",
-        "title": "SS14 Studio: Refresh Graph Index",
+        "title": "SS14 Studio: Refresh Index",
         "icon": "$(refresh)"
       },
       {
@@ -84,9 +155,49 @@
       {
         "command": "ss14Studio.revealGraphFile",
         "title": "SS14 Studio: Reveal Graph YAML"
+      },
+      {
+        "command": "ss14Studio.revealPrototypeFile",
+        "title": "SS14 Studio: Reveal Prototype YAML"
+      },
+      {
+        "command": "ss14Studio.openAbout",
+        "title": "SS14 Studio: About & AI Disclosure",
+        "icon": "$(info)"
+      },
+      {
+        "command": "ss14Studio.openSettings",
+        "title": "SS14 Studio: Open Settings",
+        "icon": "$(settings-gear)"
+      },
+      {
+        "command": "ss14Studio.formatXaml",
+        "title": "SS14 Studio: Format XAML",
+        "icon": "$(wand)"
+      },
+      {
+        "command": "ss14Studio.cleanupXaml",
+        "title": "SS14 Studio: Clean Up XAML",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "ss14Studio.markXamlAutoGenerated",
+        "title": "SS14 Studio: Mark XAML as AutoGenerated",
+        "icon": "$(tag)"
+      },
+      {
+        "command": "ss14Studio.removeXamlAutoGenerated",
+        "title": "SS14 Studio: Remove AutoGenerated Marker",
+        "icon": "$(close)"
       }
     ],
     "menus": {
+      "commandPalette": [
+        {
+          "command": "ss14Studio.openXamlPath",
+          "when": "false"
+        }
+      ],
       "view/title": [
         {
           "command": "ss14Studio.createGraph",
@@ -94,13 +205,18 @@
           "group": "navigation@1"
         },
         {
+          "command": "ss14Studio.openPrototype",
+          "when": "view == ss14Studio.prototypes",
+          "group": "navigation@1"
+        },
+        {
           "command": "ss14Studio.openDashboard",
-          "when": "view == ss14Studio.graphs",
+          "when": "view == ss14Studio.graphs || view == ss14Studio.prototypes",
           "group": "navigation@2"
         },
         {
           "command": "ss14Studio.refreshIndex",
-          "when": "view == ss14Studio.graphs",
+          "when": "view == ss14Studio.graphs || view == ss14Studio.prototypes",
           "group": "navigation@3"
         }
       ],
@@ -114,6 +230,72 @@
           "command": "ss14Studio.revealGraphFile",
           "when": "view == ss14Studio.graphs && viewItem == graph",
           "group": "navigation@2"
+        },
+        {
+          "command": "ss14Studio.openPrototype",
+          "when": "view == ss14Studio.prototypes && viewItem == prototype",
+          "group": "inline@1"
+        },
+        {
+          "command": "ss14Studio.revealPrototypeFile",
+          "when": "view == ss14Studio.prototypes && viewItem == prototype",
+          "group": "navigation@2"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "ss14Studio.openGraphForFile",
+          "when": "resourceLangId == yaml",
+          "group": "navigation@1"
+        },
+        {
+          "command": "ss14Studio.openXamlForFile",
+          "when": "resourceLangId == xaml",
+          "group": "navigation@1"
+        },
+        {
+          "command": "ss14Studio.openForFile",
+          "when": "resourceFilename =~ /\\.xaml\\.cs$/",
+          "group": "navigation@1"
+        },
+        {
+          "command": "ss14Studio.openRsiForFile",
+          "when": "resourceFilename == meta.json",
+          "group": "navigation@1"
+        },
+        {
+          "command": "ss14Studio.formatXaml",
+          "when": "resourceLangId == xaml",
+          "group": "1_modification@1"
+        },
+        {
+          "command": "ss14Studio.cleanupXaml",
+          "when": "resourceLangId == xaml",
+          "group": "1_modification@2"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "ss14Studio.openForFile",
+          "when": "resourceScheme == file",
+          "group": "ss14studio@1"
+        },
+        {
+          "command": "ss14Studio.formatXaml",
+          "when": "resourceLangId == xaml",
+          "group": "ss14studio@2"
+        },
+        {
+          "command": "ss14Studio.cleanupXaml",
+          "when": "resourceLangId == xaml",
+          "group": "ss14studio@3"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "ss14Studio.openForFile",
+          "when": "resourceScheme == file",
+          "group": "navigation@50"
         }
       ]
     },
@@ -129,12 +311,27 @@
             "Resources/Prototypes/**/*.yml",
             "Resources/Prototypes/**/*.yaml"
           ],
-          "description": "Glob patterns, relative to each workspace folder, used to find construction graph prototypes."
+          "description": "Glob patterns, relative to each workspace folder, used to find construction graph and prototype YAML."
         },
         "ss14Studio.autoRefresh": {
           "type": "boolean",
           "default": true,
-          "description": "Update the graph index and open diagrams when prototype YAML files change."
+          "description": "Update the graph and prototype index when YAML files change."
+        },
+        "ss14Studio.autoSidePreview": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically open a read-only SS14 Studio preview beside graph/prototype YAML, XAML and RSI metadata when you focus a file. Native editors keep keyboard focus."
+        },
+        "ss14Studio.defaultGraphEditor": {
+          "type": "boolean",
+          "default": false,
+          "description": "Make SS14 Studio the default view for construction graph YAML: focusing a graph file opens the visual editor while the text file stays open. Opt-in."
+        },
+        "ss14Studio.codeLenses": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show 'Open in SS14 Studio' code lenses above graphs, prototypes, XAML roots and RSI metadata."
         },
         "ss14Studio.animations": {
           "type": "boolean",
@@ -150,6 +347,86 @@
           ],
           "default": "balanced",
           "description": "How prominent the blueprint grid and glow effects are."
+        },
+        "ss14Studio.graphSprites": {
+          "type": "boolean",
+          "default": true,
+          "description": "Render entity sprites on construction graph nodes."
+        },
+        "ss14Studio.graphGrid": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the blueprint grid in the construction graph canvas."
+        },
+        "ss14Studio.graphEntityIds": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show entity prototype ids on construction graph nodes."
+        },
+        "ss14Studio.graphStats": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show node and edge statistics in the graph toolbar."
+        },
+        "ss14Studio.graphEdgeSteps": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the number of steps on construction graph edges."
+        },
+        "ss14Studio.graphMinimap": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the construction graph minimap."
+        },
+        "ss14Studio.graphLegend": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the material legend on the graph canvas."
+        },
+        "ss14Studio.graphControls": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show zoom and fit controls on the graph canvas."
+        },
+        "ss14Studio.graphPathHighlight": {
+          "type": "boolean",
+          "default": true,
+          "description": "Highlight the selected construction route."
+        },
+        "ss14Studio.graphCompact": {
+          "type": "boolean",
+          "default": false,
+          "description": "Use compact nodes in the construction graph viewer."
+        },
+        "ss14Studio.graphEdgeStyle": {
+          "type": "string",
+          "enum": [
+            "bezier",
+            "step",
+            "straight"
+          ],
+          "default": "bezier",
+          "description": "Edge routing style for construction graphs."
+        },
+        "ss14Studio.graphNodeAccent": {
+          "type": "string",
+          "enum": [
+            "hash",
+            "kind",
+            "mono"
+          ],
+          "default": "hash",
+          "description": "How node accent colors are chosen."
+        },
+        "ss14Studio.prototypeCompact": {
+          "type": "boolean",
+          "default": false,
+          "description": "Use compact rows in prototype lists."
+        },
+        "ss14Studio.prototypeShowResolved": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show inherited and resolved component fields by default in the prototype inspector."
         }
       }
     }
@@ -158,7 +435,7 @@
     "build": "node esbuild.mjs",
     "watch": "node esbuild.mjs --watch",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "package": "node -e \"require('node:fs').mkdirSync('../../releases',{recursive:true})\" && vsce package --no-dependencies --out ../../releases/ss14-studio-0.1.1.vsix"
+    "package": "node -e \"require('node:fs').mkdirSync('../../releases',{recursive:true})\" && vsce package --no-dependencies --out ../../releases/ss14-studio-0.2.0.vsix"
   },
   "devDependencies": {
     "@ss14-studio/core": "*",

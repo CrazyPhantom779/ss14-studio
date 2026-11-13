@@ -1,8 +1,10 @@
-import type { ConstructionEdge, Diagnostic } from '@ss14-studio/core';
+import type { ConstructionEdge, Diagnostic, StudioConfig } from '@ss14-studio/core';
 import {
   BaseEdge,
   EdgeLabelRenderer,
+  getBezierPath,
   getSmoothStepPath,
+  getStraightPath,
   type Edge,
   type EdgeProps,
 } from '@xyflow/react';
@@ -16,6 +18,8 @@ export type StudioEdgeData = {
   diagnostics: Diagnostic[];
   dimmed: boolean;
   highlighted: boolean;
+  edgeStyle: StudioConfig['graphEdgeStyle'];
+  showSummary: boolean;
   onSelect: () => void;
 };
 
@@ -33,16 +37,29 @@ export function StepEdge({
   selected,
   markerEnd,
 }: EdgeProps<StudioGraphEdge>) {
-  const [path, labelX, labelY] = getSmoothStepPath({
-    sourceX,
-    sourceY,
-    targetX,
-    targetY,
-    sourcePosition,
-    targetPosition,
-    borderRadius: 18,
-    offset: 30,
-  });
+  const [path, labelX, labelY] =
+    data?.edgeStyle === 'straight'
+      ? getStraightPath({ sourceX, sourceY, targetX, targetY })
+      : data?.edgeStyle === 'bezier'
+        ? getBezierPath({
+            sourceX,
+            sourceY,
+            targetX,
+            targetY,
+            sourcePosition,
+            targetPosition,
+            curvature: 0.32,
+          })
+        : getSmoothStepPath({
+            sourceX,
+            sourceY,
+            targetX,
+            targetY,
+            sourcePosition,
+            targetPosition,
+            borderRadius: 18,
+            offset: 30,
+          });
 
   if (!data) return null;
 
@@ -125,7 +142,7 @@ export function StepEdge({
             )}
             {stepCount}
           </span>
-          <span className="edge-summary">{summary}</span>
+          <span className="edge-summary">{data.showSummary ? summary : `${stepCount} step${stepCount === 1 ? '' : 's'}`}</span>
           {conditional ? (
             <span className="edge-condition" title={`${data.edge.conditions.length} condition(s)`}>
               <Filter size={9} aria-hidden />

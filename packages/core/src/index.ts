@@ -4,3 +4,7 @@ export * from './parse.js';
 export * from './validate.js';
 export * from './analyze.js';
 export * from './edit.js';
+export * from './prototypes.js';
+export * from './rsi.js';
+export * from './xaml.js';
+export * from './diff.js';

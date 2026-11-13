@@ -25,15 +25,17 @@ import {
   ListChecks,
   PanelRight,
   Plus,
+  Settings2,
   Sparkles,
   Wand2,
 } from 'lucide-react';
 import { diagnosticMaps, edgeId, pathFor } from '../lib/graph';
 import type { DialogState } from '../lib/dialogs';
 import type { StudioSelection } from '../lib/selection';
-import type { ThemeKind } from '../lib/host';
+import type { IconSheet, ThemeKind } from '../lib/host';
 import { GraphNode, type StudioGraphNode } from './GraphNode';
 import { StepEdge, type StudioGraphEdge } from './StepEdge';
+import { sheetFromIcon } from './SpritePreview';
 import { Badge, Button, IconButton } from './ui';
 import { ValidationTray } from './ValidationTray';
 
@@ -49,11 +51,15 @@ interface GraphWorkspaceProps {
   selection: StudioSelection | null;
   inspectorOpen: boolean;
   fitSignal: number;
+  icons: Record<string, IconSheet>;
   children?: ReactNode;
   onSelect: (selection: StudioSelection | null) => void;
   onPositionsChange: (positions: LayoutMap) => void;
   onZoomChange: (zoom: number) => void;
   onToggleInspector: () => void;
+  onOpenSettings: () => void;
+  onRequestIcon: (entityId: string) => void;
+  onOpenPrototype: (id: string) => void;
   onOpenDialog: (dialog: DialogState) => void;
   onOpenSource: (line?: number, node?: string, edgeIndex?: number) => void;
   onOpenDashboard: () => void;
@@ -68,11 +74,14 @@ function FlowCanvas({
   theme,
   selection,
   fitSignal,
+  icons,
   onSelect,
   onPositionsChange,
   onZoomChange,
   onOpenDialog,
   onOpenSource,
+  onRequestIcon,
+  onOpenPrototype,
 }: Pick<
   GraphWorkspaceProps,
   | 'graph'
@@ -82,13 +91,23 @@ function FlowCanvas({
   | 'theme'
   | 'selection'
   | 'fitSignal'
+  | 'icons'
   | 'onSelect'
   | 'onPositionsChange'
   | 'onZoomChange'
   | 'onOpenDialog'
   | 'onOpenSource'
+  | 'onRequestIcon'
+  | 'onOpenPrototype'
 >) {
   const { fitView } = useReactFlow();
+
+  useEffect(() => {
+    if (!config.graphSprites) return;
+    for (const node of graph.nodes) {
+      if (node.entity) onRequestIcon(node.entity);
+    }
+  }, [config.graphSprites, graph.nodes, onRequestIcon]);
 
   const maps = useMemo(() => diagnosticMaps(graph), [graph]);
 
@@ -143,6 +162,8 @@ function FlowCanvas({
             conditions,
             dimmed: hasPath && !path.nodes.has(node.name),
             highlighted: hasPath && path.nodes.has(node.name),
+            sprite: node.entity ? sheetFromIcon(icons[node.entity]) : null,
+            config,
           },
           ariaLabel: `Construction node ${node.name}`,
         };
@@ -157,6 +178,8 @@ function FlowCanvas({
       positions,
       readOnly,
       selection,
+      icons,
+      config,
     ],
   );
 
@@ -188,6 +211,8 @@ function FlowCanvas({
             diagnostics: edgeDiagnostics,
             dimmed: hasPath && !path.edges.has(id),
             highlighted,
+            edgeStyle: config.graphEdgeStyle,
+            showSummary: config.graphEdgeSteps,
             onSelect: () =>
               onSelect({
                 kind: 'edge',
@@ -206,7 +231,7 @@ function FlowCanvas({
       });
     }
     return edges;
-  }, [graph, hasPath, maps.edge, onSelect, path.edges, selection]);
+  }, [config.graphEdgeSteps, config.graphEdgeStyle, graph, hasPath, maps.edge, onSelect, path.edges, selection]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState<StudioGraphNode>(desiredNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState<StudioGraphEdge>(desiredEdges);
@@ -239,6 +264,9 @@ function FlowCanvas({
       nodeTypes={nodeTypes}
       edgeTypes={edgeTypes}
       onNodeClick={(_event, node) => onSelect({ kind: 'node', node: node.id })}
+      onNodeDoubleClick={(_event, node) => {
+        if (node.data?.model.entity) onOpenPrototype(node.data.model.entity);
+      }}
       onEdgeClick={(_event, edge) => {
         if (!edge.data) return;
         onSelect({
@@ -277,31 +305,37 @@ function FlowCanvas({
           color="var(--studio-grid-dot)"
         />
       ) : null}
-      <Controls position="bottom-left" showInteractive={false} />
-      <MiniMap
-        position="bottom-right"
-        pannable
-        zoomable
-        nodeColor={(node) => {
-          return node.id === graph.start
-            ? 'var(--studio-accent)'
-            : 'var(--studio-minimap-node)';
-        }}
-        maskColor="var(--studio-minimap-mask)"
-        className="studio-minimap"
-      />
-      <Panel position="top-left" className="canvas-legend">
-        <span>
-          <i className="legend-node" /> node
-        </span>
-        <span>
-          <i className="legend-edge" /> step path
-        </span>
-        <span>
-          <i className="legend-edge condition" /> conditional
-        </span>
-        {readOnly ? <Badge tone="warning">Read-only</Badge> : null}
-      </Panel>
+      {config.graphControls ? (
+        <Controls position="bottom-left" showInteractive={false} />
+      ) : null}
+      {config.graphMinimap ? (
+        <MiniMap
+          position="bottom-right"
+          pannable
+          zoomable
+          nodeColor={(node) => {
+            return node.id === graph.start
+              ? 'var(--studio-accent)'
+              : 'var(--studio-minimap-node)';
+          }}
+          maskColor="var(--studio-minimap-mask)"
+          className="studio-minimap"
+        />
+      ) : null}
+      {config.graphLegend ? (
+        <Panel position="top-left" className="canvas-legend">
+          <span>
+            <i className="legend-node" /> node
+          </span>
+          <span>
+            <i className="legend-edge" /> step path
+          </span>
+          <span>
+            <i className="legend-edge condition" /> conditional
+          </span>
+          {readOnly ? <Badge tone="warning">Read-only</Badge> : null}
+        </Panel>
+      ) : null}
       {graph.nodes.length === 0 ? (
         <Panel position="top-center" className="canvas-empty">
           <span className="canvas-empty-icon">
@@ -327,11 +361,15 @@ export function GraphWorkspace({
   selection,
   inspectorOpen,
   fitSignal,
+  icons,
   children,
   onSelect,
   onPositionsChange,
   onZoomChange,
   onToggleInspector,
+  onOpenSettings,
+  onRequestIcon,
+  onOpenPrototype,
   onOpenDialog,
   onOpenSource,
   onOpenDashboard,
@@ -340,6 +378,10 @@ export function GraphWorkspace({
   const diagnostics = graph.diagnostics;
   const errors = diagnostics.filter((diagnostic) => diagnostic.severity === 'error').length;
   const warnings = diagnostics.filter((diagnostic) => diagnostic.severity === 'warning').length;
+  const selectedEntity =
+    selection?.kind === 'node'
+      ? graph.nodes.find((node) => node.name === selection.node)?.entity ?? null
+      : null;
 
   const totalSteps = graph.nodes.reduce(
     (sum, node) => sum + node.edges.reduce((edgeSum, edge) => edgeSum + edge.steps.length, 0),
@@ -383,18 +425,22 @@ export function GraphWorkspace({
         </div>
 
         <div className="graph-toolbar-stats">
-          <span title="Nodes">
-            <Boxes size={12} aria-hidden />
-            {graph.nodes.length}
-          </span>
-          <span title="Edges">
-            <GitBranch size={12} aria-hidden />
-            {graph.stats.edges}
-          </span>
-          <span title="Construction steps">
-            <ListChecks size={12} aria-hidden />
-            {totalSteps}
-          </span>
+          {config.graphStats ? (
+            <>
+              <span title="Nodes">
+                <Boxes size={12} aria-hidden />
+                {graph.nodes.length}
+              </span>
+              <span title="Edges">
+                <GitBranch size={12} aria-hidden />
+                {graph.stats.edges}
+              </span>
+              <span title="Construction steps">
+                <ListChecks size={12} aria-hidden />
+                {totalSteps}
+              </span>
+            </>
+          ) : null}
           {errors > 0 ? (
             <span className="toolbar-health error">{errors} errors</span>
           ) : warnings > 0 ? (
@@ -405,6 +451,17 @@ export function GraphWorkspace({
         </div>
 
         <div className="graph-toolbar-actions">
+          {selectedEntity ? (
+            <Button
+              variant="secondary"
+              size="sm"
+              icon={Boxes}
+              onClick={() => onOpenPrototype(selectedEntity)}
+              title={`Inspect ${selectedEntity}`}
+            >
+              Prototype
+            </Button>
+          ) : null}
           <Button
             variant="primary"
             size="sm"
@@ -428,6 +485,11 @@ export function GraphWorkspace({
             onClick={() => onOpenSource()}
           />
           <IconButton
+            icon={Settings2}
+            label="Graph display settings"
+            onClick={onOpenSettings}
+          />
+          <IconButton
             icon={PanelRight}
             label={inspectorOpen ? 'Hide inspector' : 'Show inspector'}
             active={inspectorOpen}
@@ -448,11 +510,14 @@ export function GraphWorkspace({
                 theme={theme}
                 selection={selection}
                 fitSignal={fitSignal}
+                icons={icons}
                 onSelect={onSelect}
                 onPositionsChange={onPositionsChange}
                 onZoomChange={onZoomChange}
                 onOpenDialog={onOpenDialog}
                 onOpenSource={onOpenSource}
+                onRequestIcon={onRequestIcon}
+                onOpenPrototype={onOpenPrototype}
               />
             </ReactFlowProvider>
           </div>
