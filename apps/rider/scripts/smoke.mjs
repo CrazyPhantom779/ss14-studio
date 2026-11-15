@@ -7,7 +7,8 @@ import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const riderRoot = resolve(here, '..');
-const project = resolve(process.argv[2] ?? process.cwd());
+const fixtureProject = resolve(riderRoot, 'fixtures', 'sample-project');
+const project = resolve(process.argv[2] ?? fixtureProject);
 const stateDir = await mkdtemp(join(tmpdir(), 'ss14-studio-smoke-'));
 const sidecarPath = resolve(riderRoot, 'sidecar', 'dist', 'sidecar.mjs');
 const webDir = resolve(riderRoot, 'web');

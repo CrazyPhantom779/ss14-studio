@@ -18,7 +18,7 @@
     "build:rider": "npm run build:core && npm run build:ui && npm run build:rider:sidecar && npm run build:rider:web",
     "package:rider": "npm run build:rider && node apps/rider/scripts/package.mjs",
     "typecheck": "npm run typecheck -w @ss14-studio/core && npm run typecheck -w @ss14-studio/ui && npm run typecheck -w ss14-studio && npm run typecheck -w @ss14-studio/rider-sidecar",
-    "test": "npm run test -w @ss14-studio/core",
+    "test": "npm run test -w @ss14-studio/core && npm run test -w @ss14-studio/ui && npm run test -w @ss14-studio/rider-sidecar",
     "check": "npm run typecheck && npm test",
     "package": "npm run build && npm run package -w ss14-studio",
     "install:vsix": "code --install-extension releases/ss14-studio-0.2.0.vsix --force"

@@ -1,0 +1,20 @@
+- type: constructionGraph
+  id: Chair
+  start: start
+  graph:
+  - node: start
+    edges:
+    - to: chair
+      conditions:
+      - !type:EntityAnchored {}
+      steps:
+      - material: Steel
+        amount: 2
+        doAfter: 1
+  - node: chair
+    entity: ChairWood
+    edges:
+    - to: start
+      steps:
+      - tool: Prying
+        doAfter: 1

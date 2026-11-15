@@ -11,6 +11,8 @@ JetBrains Rider.**
 
 ![AI-generated](https://img.shields.io/badge/AI-generated%20%C2%B7%20human--reviewed-8b5cf6)
 ![status](https://img.shields.io/badge/status-alpha-f59e0b)
+[![build](https://github.com/ss14studio/ss14-studio/actions/workflows/build.yml/badge.svg)](https://github.com/ss14studio/ss14-studio/actions/workflows/build.yml)
+![tests](https://img.shields.io/badge/tests-139%20passing-22c55e)
 ![VS Code](https://img.shields.io/badge/VS%20Code-%5E1.90-22d3ee)
 ![Rider](https://img.shields.io/badge/Rider-2024.2%2B-22d3ee)
 ![license](https://img.shields.io/badge/license-MIT-22c55e)
@@ -328,7 +330,8 @@ apps/rider           Kotlin plugin host + Node sidecar + JCEF bridge.
 
 ```bash
 npm install
-npm run check        # typecheck every workspace + core tests
+npm run check        # typecheck every workspace and run 139 tests
+npm test             # core, UI and Rider sidecar suites
 npm run build        # core, shared UI and VS Code extension
 npm run package      # build the VSIX in releases/
 ```
@@ -370,7 +373,15 @@ wrapper. It still needs `JAVA_HOME` set to JDK 21.
 ### Sidecar smoke test
 
 The Rider sidecar has an end-to-end smoke test that starts the real server,
-connects to SSE, indexes a project, opens a graph and prototype, and shuts down:
+connects to SSE, indexes a project, opens a graph and prototype, and shuts down.
+It defaults to the committed fixture at
+`apps/rider/fixtures/sample-project`:
+
+```bash
+node apps/rider/scripts/smoke.mjs
+```
+
+Pass a real checkout path to test against a full SS14 repository:
 
 ```bash
 node apps/rider/scripts/smoke.mjs C:\path\to\SS14\repo
@@ -378,14 +389,19 @@ node apps/rider/scripts/smoke.mjs C:\path\to\SS14\repo
 
 ### Verification status
 
-- `npm run check` passes: all workspace typechecks and 30 core tests.
+- `npm run check` passes: all workspace typechecks and **139 tests across 19
+  files** — 86 core, 21 UI and 32 Rider sidecar tests.
+- CI runs the test suite on Ubuntu and Windows, packages the VSIX, runs the
+  sidecar smoke test against the committed fixture, builds the Rider plugin with
+  JDK 21, and publishes tagged releases.
 - `npm run build` succeeds for core, UI and the VS Code extension.
 - VS Code smoke test against a full Starlight checkout: 5,052 prototype files,
   427 construction graphs, 0 parse errors and 0 graph errors/warnings.
 - Prototype, RSI and XAML views were sampled across the same checkout; XAML
   parsing reported 0 errors on the sampled files.
 - Rider sidecar smoke test: health, bootstrap, SSE, indexing, graph,
-  prototype, About and Dashboard views all pass against the same checkout.
+  prototype, About and Dashboard views all pass against the same checkout and
+  against the committed fixture.
 - Entity sprites were verified in the shared UI against real RSI sheets from the
   same checkout, including the banana clown suit icon.
 - Rider Kotlin compiles and `buildPlugin` succeeds against Rider 2024.2 with
@@ -419,15 +435,21 @@ no-watermark policy and the full limitations.
 ## Contributing
 
 Issues and pull requests are welcome at
-<https://github.com/ss14studio/ss14-studio>. When reporting a rendering or
-parsing problem, include:
+<https://github.com/ss14studio/ss14-studio>. Read
+[`CONTRIBUTING.md`](./CONTRIBUTING.md) for the development workflow, design rules
+and test requirements, and follow the
+[Code of Conduct](./CODE_OF_CONDUCT.md). Security issues should use
+[`SECURITY.md`](./SECURITY.md), not the public tracker.
+
+When reporting a rendering or parsing problem, include:
 
 - the file or a minimal reproduction;
 - the SS14 Studio version from the About panel;
 - whether you are using VS Code or Rider;
 - the relevant YAML/XAML/RSI snippet.
 
-Please keep the AI disclosure intact in forks and redistributions.
+See [`CHANGELOG.md`](./CHANGELOG.md) for release notes. Please keep the AI
+disclosure intact in forks and redistributions.
 
 ## License
 

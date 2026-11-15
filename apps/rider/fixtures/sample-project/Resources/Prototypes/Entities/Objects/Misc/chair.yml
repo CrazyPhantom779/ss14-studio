@@ -1,0 +1,22 @@
+- type: entity
+  id: BaseChair
+  abstract: true
+  name: base-chair
+  description: base-chair-desc
+  components:
+  - type: Sprite
+    sprite: /Textures/Objects/Furniture/chair.rsi
+    state: icon
+  - type: Item
+    size: Normal
+
+- type: entity
+  id: ChairWood
+  parent: BaseChair
+  name: chair-wood
+  components:
+  - type: Anchorable
+    anchored: false
+  - type: Construction
+    graph: Chair
+    node: start

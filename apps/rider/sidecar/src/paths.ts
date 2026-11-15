@@ -1,5 +1,6 @@
 import { promises as fs } from 'node:fs';
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 export const IGNORED_DIRECTORIES = new Set([
   '.git',
@@ -138,8 +139,7 @@ export function resolveFileArgument(
   if (!trimmed) return undefined;
   if (/^file:/i.test(trimmed)) {
     try {
-      const url = new URL(trimmed);
-      return decodeURIComponent(url.pathname.replace(/^\/([a-zA-Z]:)/, '$1'));
+      return fileURLToPath(new URL(trimmed));
     } catch {
       return undefined;
     }

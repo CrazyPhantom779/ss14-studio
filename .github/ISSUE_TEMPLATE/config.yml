@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/ss14studio/ss14-studio/security/advisories/new
+    about: Report security issues privately. Do not open a public issue.
+  - name: AI disclosure and limitations
+    url: https://github.com/ss14studio/ss14-studio/blob/main/AI-GENERATED.md
+    about: Read how AI assistance is used, what is reviewed, and what is not verified.
+  - name: Documentation and troubleshooting
+    url: https://github.com/ss14studio/ss14-studio#readme
+    about: Install steps, commands, settings, Rider setup and known limitations.

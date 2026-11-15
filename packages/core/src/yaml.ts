@@ -198,8 +198,8 @@ export function formatScalar(value: string | number | boolean): string {
   if (typeof value === 'number') return String(value);
   if (typeof value === 'boolean') return value ? 'true' : 'false';
   if (value === '') return "''";
-  if (/^[A-Za-z0-9_][A-Za-z0-9_.\-/]*$/.test(value)) return value;
   if (/^(true|false|null|yes|no|on|off|~)$/i.test(value)) return JSON.stringify(value);
+  if (/^[A-Za-z0-9_][A-Za-z0-9_.\-/]*$/.test(value)) return value;
   return JSON.stringify(value);
 }
 

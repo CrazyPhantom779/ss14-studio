@@ -1,0 +1,107 @@
+name: Bug report
+description: Report a crash, wrong render, bad edit, indexing problem or other defect.
+title: '[Bug]: '
+labels: [bug, triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve SS14 Studio. This project is AI-generated and
+        human-reviewed; please read the [AI disclosure](https://github.com/ss14studio/ss14-studio/blob/main/AI-GENERATED.md)
+        before filing.
+
+        **Do not paste secrets, tokens or private repository contents.** A minimal
+        synthetic YAML, XAML or RSI snippet is more useful than a full checkout.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Describe the actual behavior, including any error message.
+      placeholder: The graph opened but the edge labels were missing.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+      placeholder: Edge labels should show the step summary.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Include the smallest sequence that still reproduces the issue.
+      placeholder: |
+        1. Open a repository containing Resources/Prototypes.
+        2. Run "SS14 Studio: Open Dashboard".
+        3. Open the construction graph ...
+        4. See ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: host
+    attributes:
+      label: Host
+      options:
+        - VS Code
+        - JetBrains Rider
+        - Both
+        - Not sure
+    validations:
+      required: true
+
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: SS14 Studio version (About panel), IDE version and Node.js version for Rider.
+      placeholder: SS14 Studio 0.2.0, VS Code 1.96, Node 20.18
+    validations:
+      required: true
+
+  - type: textarea
+    id: project
+    attributes:
+      label: Project context
+      description: SS14 fork/version, approximate prototype count, and whether the repository is public.
+      placeholder: Starlight fork, ~5,000 prototype files, public.
+    validations:
+      required: false
+
+  - type: textarea
+    id: reproduction-files
+    attributes:
+      label: Minimal reproduction files
+      description: Paste a reduced YAML, XAML or RSI meta.json. Redact anything private.
+      render: yaml
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs, stack traces or screenshots
+      description: |
+        VS Code: Help | Toggle Developer Tools | Console, and the "SS14 Studio" output channel.
+        Rider: Help | Show Log in Explorer/Finder.
+        Drag images directly into this field.
+      render: text
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and did not find a duplicate.
+          required: true
+        - label: I removed secrets, tokens and private repository data from this report.
+          required: true
+        - label: I have read the AI disclosure and understand the project is alpha software.
+          required: true

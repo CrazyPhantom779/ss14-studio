@@ -1,0 +1,6 @@
+- type: !Partial:0 entity
+  id: ChairWood
+  name: chair-wood-partial
+  components:
+  - type: Item
+    size: Small

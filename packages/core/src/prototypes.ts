@@ -1228,6 +1228,14 @@ export function applyPrototypeOperation(
     return { edits: [], message: `Could not find prototype "${operation.id}".` };
   }
 
+  // Prototype spans start at the `- type:` dash, while fields live at the
+  // indentation of the `id:` key. Prefer the id/type span so inserting a new
+  // field does not dedent it outside the prototype.
+  const fieldIndent = mappingIndent(
+    locator.idSpan ?? locator.typeSpan ?? locator.span,
+    lines,
+  );
+
   if (operation.kind === 'setField') {
     const pair = locateFieldPair(text, locator.span, operation.field);
     const formatted = operation.value == null ? null : formatScalar(operation.value);
@@ -1248,7 +1256,7 @@ export function applyPrototypeOperation(
     if (formatted == null) {
       return { edits: [], message: `${operation.field} was already unset.` };
     }
-    const indent = ' '.repeat(mappingIndent(locator.span, lines));
+    const indent = ' '.repeat(fieldIndent);
     const insertAt = lines.lineEndWithNewline(locator.span.endLine);
     const eol = detectEol(text);
     return {
@@ -1261,17 +1269,20 @@ export function applyPrototypeOperation(
     if (locator.componentSpans[operation.component]) {
       return { edits: [], message: `${operation.component} is already on ${operation.id}.` };
     }
-    const baseIndent = mappingIndent(locator.span, lines);
     const eol = detectEol(text);
     const unit = indentUnit(text);
     const componentsPair = locateFieldPair(text, locator.span, 'components');
+    const firstComponent = Object.values(locator.componentSpans)[0];
+    const dashIndent = firstComponent
+      ? mappingIndent(firstComponent.span, lines)
+      : fieldIndent;
     const fieldLines = Object.entries(operation.fields ?? {}).map(
-      ([key, value]) => `${' '.repeat(baseIndent + unit.length * 2)}${key}: ${formatScalar(
+      ([key, value]) => `${' '.repeat(dashIndent + unit.length)}${key}: ${formatScalar(
         typeof value === 'object' ? JSON.stringify(value) : (value as string | number | boolean),
       )}`,
     );
     const block = [
-      `${' '.repeat(baseIndent + unit.length)}- type: ${operation.component}`,
+      `${' '.repeat(dashIndent)}- type: ${operation.component}`,
       ...fieldLines,
     ].join(eol);
 
@@ -1288,7 +1299,7 @@ export function applyPrototypeOperation(
         edit(
           insertAt,
           insertAt,
-          `${' '.repeat(baseIndent)}components:${eol}${block}${eol}`,
+          `${' '.repeat(fieldIndent)}components:${eol}${block}${eol}`,
         ),
       ],
       message: `Added ${operation.component} to ${operation.id}.`,

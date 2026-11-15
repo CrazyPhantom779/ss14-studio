@@ -22,7 +22,8 @@ saves and VFS refresh.
 | --- | --- |
 | Kotlin host compiles | Yes, against Rider 2024.2 with JBR 21 |
 | `buildPlugin` produces a ZIP | Yes |
-| Node sidecar end-to-end smoke test | Yes, against a full Starlight checkout |
+| Node sidecar end-to-end smoke test | Yes, against the committed fixture and a full Starlight checkout |
+| Sidecar test suite | Yes, 32 tests across config, paths, PNG, state, server and indexer |
 | JCEF tool window on a local Rider install | **Not verified in this environment** |
 
 The plugin is packaged and ready for Rider developers to test, but it has not
@@ -163,7 +164,14 @@ npm run package:rider
 
 ### Sidecar smoke test
 
-The sidecar can be tested without launching Rider:
+The sidecar can be tested without launching Rider. It defaults to the committed
+fixture project:
+
+```bash
+node apps/rider/scripts/smoke.mjs
+```
+
+Pass a real checkout path to test against a full SS14 repository:
 
 ```bash
 node apps/rider/scripts/smoke.mjs C:\path\to\SS14\repo
