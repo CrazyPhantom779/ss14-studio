@@ -36,8 +36,10 @@ import type {
   ResolvedPrototype,
   SourceSpan,
   SpriteInfo,
+  SpriteLayerInfo,
   TextEdit,
 } from './model.js';
+import { extractStorage } from './storage.js';
 import {
   LineIndex,
   booleanValue,
@@ -224,6 +226,25 @@ function parseComponent(
     const key = String(pair.key.value);
     if (key === 'type') continue;
     fields[key] = toPlain(resolveNode(ctx, pair.value as Node));
+    if (/^[A-Z][A-Za-z0-9]*$/.test(key)) {
+      pushDiagnostic(
+        ctx,
+        'warning',
+        'prototype.component.fieldCase',
+        `Component field "${key}" uses PascalCase; SS14 component fields are camelCase (try "${key[0]!.toLowerCase()}${key.slice(1)}").`,
+        pair.key as Node,
+      );
+    }
+  }
+
+  if (/Component$/.test(resolvedType) && resolvedType !== 'Component') {
+    pushDiagnostic(
+      ctx,
+      'warning',
+      'prototype.component.suffix',
+      `Component type "${resolvedType}" ends with "Component". SS14 component types normally omit the suffix (try "${resolvedType.slice(0, -'Component'.length)}").`,
+      typeNode ?? node,
+    );
   }
 
   return {
@@ -302,6 +323,15 @@ function parsePrototypeMap(
     fields[key] = toPlain(valueNode);
     const tag = pair.key?.tag ?? valueNode?.tag;
     if (tag) fieldTags[key] = tag;
+    if (/^[A-Z][A-Za-z0-9]*$/.test(key)) {
+      pushDiagnostic(
+        ctx,
+        'warning',
+        'prototype.field.case',
+        `Prototype field "${key}" uses PascalCase; SS14 prototype fields are camelCase (try "${key[0]!.toLowerCase()}${key.slice(1)}").`,
+        pair.key as Node,
+      );
+    }
   }
 
   const components: RawPrototypeComponent[] = [];
@@ -470,7 +500,66 @@ function componentField(
   return components.find((component) => component.type === type)?.fields[field];
 }
 
-/** Locate the first sprite definition in a resolved prototype. */
+function normalizeSpritePath(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const normalized = value
+    .replace(/^\/+/, '')
+    .replace(/^Resources\//i, '')
+    .replace(/\/+$/, '');
+  return normalized || null;
+}
+
+function spriteOffset(value: unknown): { x: number; y: number } | null {
+  if (!value) return null;
+  if (Array.isArray(value) && value.length >= 2) {
+    const x = Number(value[0]);
+    const y = Number(value[1]);
+    return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null;
+  }
+  if (typeof value === 'string') {
+    const [x, y] = value.split(/[,\s]+/).map((part) => Number(part));
+    return Number.isFinite(x) && Number.isFinite(y) ? { x: x!, y: y! } : null;
+  }
+  if (typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    const x = Number(record.x);
+    const y = Number(record.y);
+    return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null;
+  }
+  return null;
+}
+
+function spriteNumber(value: unknown): number | null {
+  const number = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function spriteColor(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function spriteMapFields(
+  fields: Record<string, unknown>,
+  type: string,
+): Record<string, unknown> {
+  const extra: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(fields)) {
+    if (key === 'type') continue;
+    if (type === 'Icon' && key === 'icon') continue;
+    if (type === 'Sprite' && key === 'sprite') continue;
+    if (['state', 'color', 'scale', 'offset', 'rotation', 'visible', 'layers', 'texture'].includes(key)) continue;
+    extra[key] = value;
+  }
+  return extra;
+}
+
+/**
+ * Locate the first sprite definition in a resolved prototype.
+ *
+ * Components are already merged from the inheritance chain, so this sees
+ * parent sprites and child overrides. Both the compact `sprite`/`state` form
+ * and the layered `layers:` form are supported.
+ */
 export function extractSprite(
   components: PrototypeComponent[],
   fields: Record<string, unknown>,
@@ -479,49 +568,94 @@ export function extractSprite(
   for (const type of candidates) {
     const component = components.find((candidate) => candidate.type === type);
     if (!component) continue;
-    const rsi = typeof component.fields.sprite === 'string'
-      ? component.fields.sprite
-      : typeof fields.sprite === 'string'
-        ? fields.sprite
+
+    // Icon uses `icon:` while Sprite uses `sprite:`. Some fork components use
+    // the other spelling, so accept both.
+    const iconValue = component.fields.icon;
+    const iconMap =
+      iconValue && typeof iconValue === 'object' && !Array.isArray(iconValue)
+        ? (iconValue as Record<string, unknown>)
         : null;
-    let state =
-      typeof component.fields.state === 'string'
-        ? component.fields.state
-        : null;
-    const layers = component.fields.layers;
-    let layerState: string | null = null;
-    if (Array.isArray(layers)) {
-      for (const layer of layers) {
-        if (!layer || typeof layer !== 'object') continue;
-        const record = layer as Record<string, unknown>;
-        if (typeof record.state === 'string') {
-          layerState = record.state;
-          break;
-        }
-      }
+    const topRsi =
+      normalizeSpritePath(component.fields.sprite) ??
+      normalizeSpritePath(component.fields.texture) ??
+      normalizeSpritePath(iconMap?.sprite) ??
+      normalizeSpritePath(iconValue) ??
+      normalizeSpritePath(fields.sprite);
+    const topState =
+      (typeof component.fields.state === 'string' ? component.fields.state : null) ??
+      (typeof iconMap?.state === 'string' ? iconMap.state : null);
+    const topColor =
+      spriteColor(component.fields.color) ?? spriteColor(iconMap?.color);
+    const topScale =
+      spriteNumber(component.fields.scale) ?? spriteNumber(iconMap?.scale);
+    const topOffset =
+      spriteOffset(component.fields.offset) ?? spriteOffset(iconMap?.offset);
+    const topRotation = spriteNumber(component.fields.rotation);
+    const topVisible = component.fields.visible !== false;
+
+    const layerInputs = Array.isArray(component.fields.layers)
+      ? component.fields.layers
+      : [];
+    const layers: SpriteLayerInfo[] = [];
+    for (const [index, input] of layerInputs.entries()) {
+      if (!input || typeof input !== 'object' || Array.isArray(input)) continue;
+      const record = input as Record<string, unknown>;
+      const layerRsi =
+        normalizeSpritePath(record.sprite) ??
+        normalizeSpritePath(record.texture) ??
+        topRsi;
+      const layerState =
+        typeof record.state === 'string'
+          ? record.state
+          : index === 0
+            ? topState
+            : topState;
+      if (!layerRsi && !layerState) continue;
+      layers.push({
+        index,
+        rsi: layerRsi,
+        state: layerState ?? 'icon',
+        texture: layerRsi && !layerRsi.endsWith('.rsi') ? layerRsi : null,
+        color: spriteColor(record.color) ?? topColor,
+        scale: spriteNumber(record.scale) ?? topScale,
+        offset: spriteOffset(record.offset) ?? topOffset,
+        visible: record.visible !== false,
+        map: Array.isArray(record.map) ? record.map.join(', ') : typeof record.map === 'string' ? record.map : null,
+        fields: { ...record },
+      });
     }
-    state = state ?? layerState;
-    if (!rsi && !state) continue;
-    const normalized = rsi
-      ?.replace(/^\/+/, '')
-      .replace(/^Resources\//, '')
-      .replace(/\/+$/, '');
-    const scale =
-      typeof component.fields.scale === 'number'
-        ? component.fields.scale
-        : null;
-    const color =
-      typeof component.fields.color === 'string'
-        ? component.fields.color
-        : null;
+
+    if (layers.length === 0 && (topRsi || topState)) {
+      layers.push({
+        index: 0,
+        rsi: topRsi,
+        state: topState ?? 'icon',
+        texture: topRsi && !topRsi.endsWith('.rsi') ? topRsi : null,
+        color: topColor,
+        scale: topScale,
+        offset: topOffset,
+        visible: topVisible,
+        map: null,
+        fields: {},
+      });
+    }
+
+    if (layers.length === 0) continue;
+    const base = layers[0]!;
     return {
-      rsi: normalized ?? null,
-      state: state ?? 'icon',
-      layerState,
-      color,
-      scale,
+      rsi: base.rsi,
+      state: base.state,
+      layerState: base.state,
+      color: base.color,
+      scale: base.scale,
+      offset: base.offset,
+      rotation: topRotation,
+      visible: topVisible,
       component: type,
-      texture: normalized && !normalized.endsWith('.rsi') ? normalized : null,
+      texture: base.texture,
+      layers,
+      extra: spriteMapFields(component.fields, type),
     };
   }
   return null;
@@ -732,6 +866,7 @@ export class PrototypeRegistry {
     parents: ResolvedPrototype[],
     own: RawPrototypeComponent[],
     record: RawPrototype,
+    diagnostics: Diagnostic[] = [],
   ): PrototypeComponent[] {
     const output: PrototypeComponent[] = [];
 
@@ -793,6 +928,23 @@ export class PrototypeRegistry {
         continue;
       }
       const cleared = component.operation === 'clear';
+      if (!cleared) {
+        const ownEntries = Object.entries(component.fields);
+        const redundant =
+          ownEntries.length === 0 ||
+          ownEntries.every(([key, value]) =>
+            JSON.stringify(existing.fields[key]) === JSON.stringify(value),
+          );
+        if (redundant) {
+          diagnostics.push({
+            severity: 'warning',
+            code: 'prototype.component.redundant',
+            message: `${record.id} redeclares ${component.type} without overriding any inherited field. Remove it or change a value.`,
+            line: record.line,
+            node: record.id,
+          });
+        }
+      }
       if (cleared) existing.fields = {};
       for (const [key, value] of Object.entries(component.fields)) {
         existing.fields[key] = value;
@@ -887,7 +1039,7 @@ export class PrototypeRegistry {
       });
     }
 
-    const components = this.mergeComponents(parents, effective.components, effective);
+    const components = this.mergeComponents(parents, effective.components, effective, diagnostics);
     const sprite = extractSprite(components, fields);
 
     const rawName = fieldString(fields, 'name');
@@ -1064,6 +1216,24 @@ export class PrototypeRegistry {
       });
     }
 
+    const storage = extractStorage(resolved.components, (itemId) => {
+      const item = this.resolve(itemId);
+      if (!item) return null;
+      const size = item.components.find((component) => component.type === 'Item')?.fields.size;
+      return {
+        name: item.name,
+        kind: item.kind,
+        sprite: item.sprite,
+        footprint:
+          size === 'Large' || size === 'Huge'
+            ? { width: 2, height: 2 }
+            : { width: 1, height: 1 },
+      };
+    });
+    if (storage) {
+      diagnostics.push(...storage.diagnostics);
+    }
+
     return {
       key: record.key,
       summary,
@@ -1072,6 +1242,7 @@ export class PrototypeRegistry {
       children,
       partials,
       diagnostics,
+      storage,
     };
   }
 
@@ -1212,6 +1383,116 @@ function mappingIndent(span: SourceSpan, lines: LineIndex): number {
   return line.length - line.trimStart().length;
 }
 
+function renderYamlScalar(value: unknown): string {
+  if (value == null) return 'null';
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return formatScalar(value);
+  }
+  return JSON.stringify(value);
+}
+
+function isYamlContainer(value: unknown): value is Record<string, unknown> | unknown[] {
+  return Boolean(value) && typeof value === 'object';
+}
+
+function renderYamlValue(
+  value: unknown,
+  indent: string,
+  unit: string,
+): string[] {
+  if (Array.isArray(value)) {
+    if (value.length === 0) return [`${indent}[]`];
+    const lines: string[] = [];
+    for (const item of value) {
+      if (isYamlContainer(item)) {
+        const nested = renderYamlValue(item, `${indent}${unit}`, unit);
+        const first = nested[0] ?? `${indent}${unit}{}`;
+        lines.push(`${indent}- ${first.slice(indent.length + unit.length)}`);
+        lines.push(...nested.slice(1));
+      } else {
+        lines.push(`${indent}- ${renderYamlScalar(item)}`);
+      }
+    }
+    return lines;
+  }
+  if (value && typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>);
+    if (entries.length === 0) return [`${indent}{}`];
+    const lines: string[] = [];
+    for (const [key, nestedValue] of entries) {
+      lines.push(...renderYamlField(key, nestedValue, indent, unit));
+    }
+    return lines;
+  }
+  return [`${indent}${renderYamlScalar(value)}`];
+}
+
+function renderYamlField(
+  key: string,
+  value: unknown,
+  indent: string,
+  unit: string,
+): string[] {
+  if (Array.isArray(value)) {
+    if (value.length === 0) return [`${indent}${key}: []`];
+    return [`${indent}${key}:`, ...renderYamlValue(value, indent, unit)];
+  }
+  if (value && typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>);
+    if (entries.length === 0) return [`${indent}${key}: {}`];
+    return [
+      `${indent}${key}:`,
+      ...renderYamlValue(value, `${indent}${unit}`, unit),
+    ];
+  }
+  return [`${indent}${key}: ${renderYamlScalar(value)}`];
+}
+
+function renderComponentBlock(
+  type: string,
+  fields: Record<string, unknown>,
+  dashIndent: number,
+  unit: string,
+  eol: string,
+): string {
+  const dash = ' '.repeat(dashIndent);
+  const fieldIndent = `${dash}${unit}`;
+  const lines = [`${dash}- type: ${type}`];
+  for (const [key, value] of Object.entries(fields)) {
+    lines.push(...renderYamlField(key, value, fieldIndent, unit));
+  }
+  return lines.join(eol);
+}
+
+function storageContentToYaml(content: {
+  id: string;
+  amount?: number;
+  prob?: number;
+  orGroup?: string;
+  extra?: Record<string, unknown>;
+}): Record<string, unknown> {
+  return {
+    id: content.id,
+    ...(content.amount != null && content.amount !== 1 ? { amount: content.amount } : {}),
+    ...(content.prob != null && content.prob !== 1 ? { prob: content.prob } : {}),
+    ...(content.orGroup ? { orGroup: content.orGroup } : {}),
+    ...(content.extra ?? {}),
+  };
+}
+
+function ownComponentFields(
+  source: string,
+  id: string,
+  component: string,
+): Record<string, unknown> {
+  const parsed = parsePrototypeFile(source, {
+    filePath: '',
+    relativePath: '',
+  });
+  const record = parsed.prototypes.find((candidate) => candidate.id === id);
+  return record?.components.find((candidate) => candidate.type === component)?.fields ?? {};
+}
+
 /**
  * Apply one surgical prototype edit. Ranges are computed from the current
  * source, so callers must reparse between edits.
@@ -1338,6 +1619,57 @@ export function applyPrototypeOperation(
     return {
       edits: [edit(insertAt, insertAt, `${indent}${operation.field}: ${formatted}${eol}`)],
       message: `Added ${operation.component}.${operation.field}.`,
+    };
+  }
+
+  if (operation.kind === 'setComponentFields' || operation.kind === 'setStorageContents' || operation.kind === 'setStorageGrid') {
+    const componentType =
+      operation.kind === 'setComponentFields'
+        ? operation.component
+        : operation.kind === 'setStorageContents'
+          ? 'StorageFill'
+          : 'Storage';
+    const own = ownComponentFields(text, operation.id, componentType);
+    const fields =
+      operation.kind === 'setComponentFields'
+        ? operation.fields
+        : operation.kind === 'setStorageContents'
+          ? { ...own, contents: operation.contents.map(storageContentToYaml) }
+          : { ...own, grid: operation.grid };
+    const eol = detectEol(text);
+    const unit = indentUnit(text);
+    const componentsPair = locateFieldPair(text, locator.span, 'components');
+    const firstComponent = Object.values(locator.componentSpans)[0];
+    const dashIndent = firstComponent
+      ? mappingIndent(firstComponent.span, lines)
+      : fieldIndent;
+    const block = renderComponentBlock(componentType, fields, dashIndent, unit, eol);
+    const target = locator.componentSpans[componentType];
+    if (target) {
+      const start = lines.lineStart(target.span.line);
+      const end = lines.lineEndWithNewline(target.span.endLine);
+      return {
+        edits: [edit(start, end, `${block}${eol}`)],
+        message: `Updated ${componentType} on ${operation.id}.`,
+      };
+    }
+    if (componentsPair) {
+      const insertAt = lines.lineEndWithNewline(componentsPair.line);
+      return {
+        edits: [edit(insertAt, insertAt, `${block}${eol}`)],
+        message: `Added ${componentType} to ${operation.id}.`,
+      };
+    }
+    const insertAt = lines.lineEndWithNewline(locator.span.endLine);
+    return {
+      edits: [
+        edit(
+          insertAt,
+          insertAt,
+          `${' '.repeat(fieldIndent)}components:${eol}${block}${eol}`,
+        ),
+      ],
+      message: `Added ${componentType} to ${operation.id}.`,
     };
   }
 

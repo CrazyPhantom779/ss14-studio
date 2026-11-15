@@ -10,12 +10,15 @@ import {
   diffText,
   EditFailure,
   findOrphanImages,
+  localizeXamlText,
   parseRsiMeta,
   parseXaml,
   renderGraphTemplate,
+  robustColorToCss,
   serializeRsiMeta,
   type ConstructionGraph,
   type CreateGraphOptions,
+  type CSharpView,
   type DiffPayload,
   type Diagnostic,
   type EditResult,
@@ -29,8 +32,11 @@ import {
   type RsiOperation,
   type RsiView,
   type SpriteInfo,
+  type SpriteLayerInfo,
   type WebviewMessage,
   type WorkspaceView,
+  type XamlDesignNode,
+  type XamlImageInfo,
   type XamlOperation,
   type XamlView,
 } from '@ss14-studio/core';
@@ -54,15 +60,26 @@ import {
   writeTextFile,
 } from './paths.js';
 
+interface IconSheetResult {
+  width: number;
+  height: number;
+  frameWidth: number;
+  frameHeight: number;
+  columns: number;
+}
+
+interface IconLayerResult extends IconSheetResult {
+  uri: string;
+  color?: string | null;
+  scale?: number | null;
+  offset?: { x: number; y: number } | null;
+  visible?: boolean;
+}
+
 interface IconResult {
   uri: string | null;
-  sheet?: {
-    width: number;
-    height: number;
-    frameWidth: number;
-    frameHeight: number;
-    columns: number;
-  };
+  sheet?: IconSheetResult;
+  layers?: IconLayerResult[];
 }
 
 export class StudioSession {
@@ -91,6 +108,7 @@ export class StudioSession {
         }
       },
       onPrototypes: (payload) => {
+        this.iconCache.clear();
         this.broadcast({ type: 'prototypes', payload });
         if (this.ready && this.currentView.kind === 'prototype') {
           this.postPrototype(
@@ -215,6 +233,9 @@ export class StudioSession {
         case 'openXaml':
           await this.postXaml(message.path);
           break;
+        case 'openCSharp':
+          await this.postCSharp(message.path);
+          break;
         case 'pickRsi': {
           const path = await this.ide.pickFile({
             title: 'Open an RSI sprite folder',
@@ -229,6 +250,14 @@ export class StudioSession {
             extensions: ['xaml'],
           });
           if (path) await this.postXaml(path);
+          break;
+        }
+        case 'pickCSharp': {
+          const path = await this.ide.pickFile({
+            title: 'Open a C# file in SS14 Studio',
+            extensions: ['cs'],
+          });
+          if (path) await this.postCSharp(path);
           break;
         }
         case 'openAbout':
@@ -383,6 +412,10 @@ export class StudioSession {
     this.post({ type: 'view', view: this.currentView });
   }
 
+  async openCSharp(path: string): Promise<void> {
+    await this.postCSharp(path);
+  }
+
   async showDiff(payload: DiffPayload): Promise<void> {
     this.currentDiff = payload;
     this.currentView = { kind: 'diff', payload };
@@ -408,6 +441,10 @@ export class StudioSession {
     }
     if (lower.endsWith('.xaml')) {
       await this.postXaml(absolute);
+      return;
+    }
+    if (lower.endsWith('.cs')) {
+      await this.postCSharp(absolute);
       return;
     }
     if (
@@ -476,7 +513,7 @@ export class StudioSession {
     if (!quiet) {
       this.toast(
         'info',
-        'Open a graph/prototype YAML, XAML, XAML.cs or RSI file.',
+        'Open a graph/prototype YAML, XAML, XAML.cs, C# or RSI file.',
       );
     }
   }
@@ -578,6 +615,9 @@ export class StudioSession {
         break;
       case 'xaml':
         await this.postXaml(this.currentView.path);
+        break;
+      case 'csharp':
+        await this.postCSharp(this.currentView.path);
         break;
       case 'diff':
         this.post({ type: 'diff', payload: this.currentView.payload });
@@ -692,6 +732,31 @@ export class StudioSession {
       return;
     }
     this.post({ type: 'xaml', view });
+  }
+
+  private async postCSharp(path: string): Promise<void> {
+    const absolute = this.resolvePath(path);
+    if (!absolute) {
+      this.post({
+        type: 'csharp',
+        view: null,
+        message: `Could not resolve "${path}".`,
+      });
+      return;
+    }
+    const view = await this.index.getCSharpView(absolute);
+    this.currentView = { kind: 'csharp', path: absolute };
+    this.currentKey = undefined;
+    this.post({ type: 'view', view: this.currentView });
+    if (!view) {
+      this.post({
+        type: 'csharp',
+        view: null,
+        message: `Could not read ${basename(absolute)}.`,
+      });
+      return;
+    }
+    this.post({ type: 'csharp', view });
   }
 
   private async getGraphForDisplay(
@@ -858,7 +923,14 @@ export class StudioSession {
     const notes = [...result.notes];
 
     if (result.changed) {
-      await writeTextFile(metaPath, serializeRsiMeta(result.meta));
+      const config = this.store.settings.config;
+      await writeTextFile(
+        metaPath,
+        serializeRsiMeta(result.meta, {
+          indent: config.rsiMetaIndent,
+          finalNewline: config.rsiMetaFinalNewline,
+        }),
+      );
       this.ide.refreshFiles([metaPath]);
 
       if (operation.kind === 'renameState' && operation.name !== operation.state) {
@@ -1021,6 +1093,7 @@ export class StudioSession {
       before,
       operation,
       this.index.relativePath(absolute),
+      { indentSize: this.store.settings.config.xamlIndentSize },
     );
     if (result.text === before) {
       return { ok: true, message: result.message };
@@ -1126,6 +1199,7 @@ export class StudioSession {
         entityId,
         uri: cached.uri,
         sheet: cached.sheet,
+        layers: cached.layers,
       });
       return;
     }
@@ -1137,20 +1211,20 @@ export class StudioSession {
       entityId,
       uri: result.uri,
       sheet: result.sheet,
+      layers: result.layers,
     });
   }
 
-  private async buildEntityIcon(
-    sprite: SpriteInfo | null,
-  ): Promise<IconResult> {
-    if (!sprite) return { uri: null };
-    if (!sprite.rsi && sprite.texture) {
-      const texturePath = this.resolveResourcePath(sprite.texture);
-      if (!texturePath) return { uri: null };
+  private async loadSpriteSheet(
+    layer: Pick<SpriteLayerInfo, 'rsi' | 'state' | 'texture'>,
+  ): Promise<{ uri: string; sheet: IconSheetResult } | null> {
+    if (!layer.rsi && layer.texture) {
+      const texturePath = this.resolveResourcePath(layer.texture);
+      if (!texturePath) return null;
       try {
         const bytes = await fs.readFile(texturePath);
         const dimensions = pngDimensions(bytes);
-        if (!dimensions) return { uri: null };
+        if (!dimensions) return null;
         return {
           uri: dataUrl(bytes),
           sheet: {
@@ -1162,14 +1236,13 @@ export class StudioSession {
           },
         };
       } catch {
-        return { uri: null };
+        return null;
       }
     }
-    if (!sprite.rsi) return { uri: null };
-    const dir = await this.resolveRsiDir(sprite.rsi);
-    if (!dir) return { uri: null };
-    const stateName = sprite.state ?? sprite.layerState;
-    if (!stateName) return { uri: null };
+    if (!layer.rsi) return null;
+    const dir = await this.resolveRsiDir(layer.rsi);
+    if (!dir) return null;
+    const stateName = layer.state ?? 'icon';
     let size = { x: 32, y: 32 };
     try {
       const meta = parseRsiMeta(
@@ -1182,7 +1255,7 @@ export class StudioSession {
     try {
       const bytes = await fs.readFile(join(dir, `${stateName}.png`));
       const dimensions = pngDimensions(bytes);
-      if (!dimensions) return { uri: null };
+      if (!dimensions) return null;
       const columns = Math.max(
         1,
         Math.floor(dimensions.width / Math.max(1, size.x)),
@@ -1198,8 +1271,58 @@ export class StudioSession {
         },
       };
     } catch {
-      return { uri: null };
+      return null;
     }
+  }
+
+  private async buildEntityIcon(
+    sprite: SpriteInfo | null,
+  ): Promise<IconResult> {
+    if (!sprite) return { uri: null };
+    const layers: SpriteLayerInfo[] =
+      sprite.layers && sprite.layers.length > 0
+        ? sprite.layers
+        : [
+            {
+              index: 0,
+              rsi: sprite.rsi,
+              state: sprite.state ?? sprite.layerState ?? 'icon',
+              texture: sprite.texture ?? null,
+              color: sprite.color ?? null,
+              scale: sprite.scale ?? null,
+              offset: sprite.offset ?? null,
+              visible: sprite.visible !== false,
+              map: null,
+              fields: {},
+            },
+          ];
+    const resolved: IconLayerResult[] = [];
+    for (const layer of layers) {
+      if (layer.visible === false) continue;
+      const loaded = await this.loadSpriteSheet(layer);
+      if (!loaded) continue;
+      resolved.push({
+        ...loaded.sheet,
+        uri: loaded.uri,
+        color: layer.color,
+        scale: layer.scale,
+        offset: layer.offset,
+        visible: layer.visible,
+      });
+    }
+    if (resolved.length === 0) return { uri: null };
+    const primary = resolved[0]!;
+    return {
+      uri: primary.uri,
+      sheet: {
+        width: primary.width,
+        height: primary.height,
+        frameWidth: primary.frameWidth,
+        frameHeight: primary.frameHeight,
+        columns: primary.columns,
+      },
+      layers: resolved.length > 1 ? resolved : undefined,
+    };
   }
 
   private async readRsi(
@@ -1332,12 +1455,112 @@ export class StudioSession {
     } catch {
       codeBehindSource = null;
     }
-    return parseXaml(text, {
+    const view = parseXaml(text, {
       filePath: path,
       relativePath: this.index.relativePath(path),
       codeBehindPath,
       codeBehindSource,
     });
+    return this.enrichXamlView(view);
+  }
+
+  /**
+   * Fill in the parts of the simulated designer that need project data:
+   * resolved Fluent strings, texture data URLs and entity sprites.
+   */
+  private async enrichXamlView(view: XamlView): Promise<XamlView> {
+    const walk = async (node: XamlDesignNode): Promise<void> => {
+      const text = localizeXamlText(node.text, (key) =>
+        this.index.resolveLocalization(key),
+      );
+      node.textResolved = text.text;
+      node.textKey = text.key;
+      const tooltip = localizeXamlText(node.tooltip, (key) =>
+        this.index.resolveLocalization(key),
+      );
+      node.tooltipResolved = tooltip.text;
+      node.style.color = robustColorToCss(node.style.color);
+      node.style.background = robustColorToCss(node.style.background);
+      node.style.borderColor = robustColorToCss(node.style.borderColor);
+      node.image = await this.resolveXamlImage(node);
+      await Promise.all(node.children.map(walk));
+    };
+    if (view.design) await walk(view.design);
+    return view;
+  }
+
+  private async resolveXamlImage(
+    node: XamlDesignNode,
+  ): Promise<XamlImageInfo | null> {
+    const attributes = node.attributes ?? {};
+    const fit = xamlImageFit(attributes.StretchMode ?? attributes.Stretch);
+    const texture = (attributes.TexturePath ?? attributes.Texture ?? '').trim();
+    const prototype = (
+      attributes.Prototype ??
+      attributes.Entity ??
+      attributes.EntityPrototype ??
+      ''
+    ).trim();
+    const state = (attributes.State ?? attributes.SpriteState ?? '').trim();
+
+    if (prototype && !texture) {
+      const sprite = this.index.getEntitySprite(prototype);
+      if (!sprite) return null;
+      const icon = await this.buildEntityIcon(sprite);
+      if (!icon.uri || !icon.sheet) return null;
+      return {
+        uri: icon.uri,
+        ...icon.sheet,
+        fit,
+        source: prototype,
+        kind: 'entity',
+      };
+    }
+
+    if (!texture || texture.startsWith('{') || texture.startsWith('$')) {
+      return null;
+    }
+    if (texture.endsWith('.rsi') || state) {
+      const sprite: SpriteInfo = {
+        rsi: texture.replace(/^\/+/, '').replace(/^Resources\//i, ''),
+        state: state || 'icon',
+        layerState: state || 'icon',
+        color: null,
+        scale: null,
+        component: 'Sprite',
+        texture: texture.endsWith('.rsi') ? null : texture,
+      };
+      const icon = await this.buildEntityIcon(sprite);
+      if (!icon.uri || !icon.sheet) return null;
+      return {
+        uri: icon.uri,
+        ...icon.sheet,
+        fit,
+        source: texture,
+        kind: 'sprite',
+      };
+    }
+
+    const texturePath = this.resolveResourcePath(texture);
+    if (!texturePath) return null;
+    try {
+      const bytes = await fs.readFile(texturePath);
+      const dimensions = pngDimensions(bytes);
+      if (!dimensions) return null;
+      return {
+        uri: dataUrl(bytes),
+        width: dimensions.width,
+        height: dimensions.height,
+        frameWidth: dimensions.width,
+        frameHeight: dimensions.height,
+        columns: 1,
+        fit,
+        source: texture,
+        kind: 'texture',
+      };
+    } catch {
+      return null;
+    }
   }
 
   private resolvePath(path: string): string | undefined {
@@ -1379,5 +1602,26 @@ export class StudioSession {
 
   private post(message: HostMessage): void {
     this.broadcast(message);
+  }
+}
+
+function xamlImageFit(value: string | undefined): XamlImageInfo['fit'] {
+  switch ((value ?? '').toLowerCase()) {
+    case 'scale':
+    case 'stretch':
+      return 'stretch';
+    case 'keepaspectcovered':
+    case 'keepaspectcover':
+    case 'cover':
+      return 'cover';
+    case 'keep':
+    case 'keepcentered':
+    case 'none':
+      return 'none';
+    case 'keepaspectcentered':
+    case 'keepaspect':
+    case 'contain':
+    default:
+      return 'contain';
   }
 }

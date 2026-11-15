@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
   CreateGraphOptions,
+  CSharpView,
   DiffPayload,
   EditResult,
   GraphOperation,
@@ -31,13 +32,22 @@ export interface ToastItem {
   message: string;
 }
 
-export interface IconSheet {
+export interface IconLayerSheet {
   uri: string;
   width: number;
   height: number;
   frameWidth: number;
   frameHeight: number;
   columns: number;
+  color?: string | null;
+  scale?: number | null;
+  offset?: { x: number; y: number } | null;
+  visible?: boolean;
+}
+
+export interface IconSheet extends IconLayerSheet {
+  /** Additional draw layers when the entity sprite is layered. */
+  layers?: IconLayerSheet[];
 }
 
 interface PendingRequest {
@@ -66,6 +76,9 @@ const DEFAULT_CONFIG: StudioConfig = {
   prototypeShowResolved: true,
   autoSidePreview: false,
   defaultGraphEditor: false,
+  xamlIndentSize: 4,
+  rsiMetaIndent: 2,
+  rsiMetaFinalNewline: true,
 };
 
 export interface StudioHost {
@@ -75,6 +88,7 @@ export interface StudioHost {
   prototype: PrototypeView | null;
   rsi: RsiView | null;
   xaml: XamlView | null;
+  csharp: CSharpView | null;
   diff: DiffPayload | null;
   view: WorkspaceView;
   positions: LayoutMap;
@@ -90,8 +104,10 @@ export interface StudioHost {
   openPrototype: (id: string, kind?: string) => void;
   openRsi: (path: string) => void;
   openXaml: (path: string) => void;
+  openCSharp: (path: string) => void;
   pickRsi: () => void;
   pickXaml: () => void;
+  pickCSharp: () => void;
   openPath: (path: string, line?: number) => void;
   openAbout: () => void;
   applyOperation: (operation: GraphOperation) => Promise<EditResult>;
@@ -127,6 +143,7 @@ export function useStudioHost(): StudioHost {
   const [prototype, setPrototype] = useState<PrototypeView | null>(null);
   const [rsi, setRsi] = useState<RsiView | null>(null);
   const [xaml, setXaml] = useState<XamlView | null>(null);
+  const [csharp, setCSharp] = useState<CSharpView | null>(null);
   const [diff, setDiff] = useState<DiffPayload | null>(null);
   const [view, setView] = useState<WorkspaceView>({ kind: 'dashboard' });
   const [positions, setPositions] = useState<LayoutMap>({});
@@ -212,6 +229,8 @@ export function useStudioHost(): StudioHost {
 
         case 'prototypes':
           setPrototypes(message.payload);
+          requestedIconsRef.current.clear();
+          setIcons({});
           break;
 
         case 'prototype':
@@ -235,6 +254,13 @@ export function useStudioHost(): StudioHost {
           }
           break;
 
+        case 'csharp':
+          setCSharp(message.view);
+          if (!message.view && message.message) {
+            notifyRef.current('error', message.message);
+          }
+          break;
+
         case 'diff':
           setDiff(message.payload);
           break;
@@ -246,6 +272,7 @@ export function useStudioHost(): StudioHost {
             setPrototype(null);
             setRsi(null);
             setXaml(null);
+            setCSharp(null);
           }
           break;
 
@@ -336,6 +363,7 @@ export function useStudioHost(): StudioHost {
               frameWidth: sheet?.frameWidth ?? 32,
               frameHeight: sheet?.frameHeight ?? 32,
               columns: sheet?.columns ?? 1,
+              layers: message.layers?.map((layer) => ({ ...layer })),
             },
           }));
           break;
@@ -384,12 +412,20 @@ export function useStudioHost(): StudioHost {
     post({ type: 'openXaml', path });
   }, []);
 
+  const openCSharp = useCallback((path: string) => {
+    post({ type: 'openCSharp', path });
+  }, []);
+
   const pickRsi = useCallback(() => {
     post({ type: 'pickRsi' });
   }, []);
 
   const pickXaml = useCallback(() => {
     post({ type: 'pickXaml' });
+  }, []);
+
+  const pickCSharp = useCallback(() => {
+    post({ type: 'pickCSharp' });
   }, []);
 
   const openPath = useCallback((path: string, line?: number) => {
@@ -592,6 +628,7 @@ export function useStudioHost(): StudioHost {
     prototype,
     rsi,
     xaml,
+    csharp,
     diff,
     view,
     positions,
@@ -607,8 +644,10 @@ export function useStudioHost(): StudioHost {
     openPrototype,
     openRsi,
     openXaml,
+    openCSharp,
     pickRsi,
     pickXaml,
+    pickCSharp,
     openPath,
     openAbout,
     applyOperation,

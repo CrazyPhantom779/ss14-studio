@@ -5,6 +5,8 @@ export * from './validate.js';
 export * from './analyze.js';
 export * from './edit.js';
 export * from './prototypes.js';
+export * from './storage.js';
+export * from './csharp.js';
 export * from './rsi.js';
 export * from './xaml.js';
 export * from './diff.js';

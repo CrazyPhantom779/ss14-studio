@@ -1,5 +1,5 @@
 import { useMemo, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from 'react';
-import type { XamlDesignNode } from '@ss14-studio/core';
+import type { XamlDesignNode, XamlImageInfo } from '@ss14-studio/core';
 import {
   Braces,
   Check,
@@ -36,41 +36,129 @@ function dimension(value: string | null): string | undefined {
   return value;
 }
 
+function alignment(value: string | undefined): CSSProperties['justifyContent'] {
+  switch ((value ?? '').toLowerCase()) {
+    case 'center':
+      return 'center';
+    case 'right':
+    case 'end':
+      return 'flex-end';
+    case 'left':
+    case 'begin':
+    case 'start':
+      return 'flex-start';
+    default:
+      return undefined;
+  }
+}
+
+function crossAlignment(value: string | undefined): CSSProperties['alignItems'] {
+  switch ((value ?? '').toLowerCase()) {
+    case 'center':
+      return 'center';
+    case 'bottom':
+    case 'end':
+      return 'flex-end';
+    case 'top':
+    case 'begin':
+    case 'start':
+      return 'flex-start';
+    default:
+      return undefined;
+  }
+}
+
 function designStyle(node: XamlDesignNode): CSSProperties {
   const style: CSSProperties = {
     margin: thickness(node.style.margin),
     padding: thickness(node.style.padding),
     color: node.style.color ?? undefined,
     background: node.style.background ?? undefined,
-    border: node.style.border ?? undefined,
-    justifyContent:
-      node.style.align === 'Center' ? 'center' : node.style.align === 'Right' || node.style.align === 'End' ? 'flex-end' : undefined,
-    alignItems:
-      node.style.justify === 'Center' ? 'center' : node.style.justify === 'Bottom' ? 'flex-end' : undefined,
+    borderColor: node.style.borderColor ?? undefined,
+    borderStyle: node.style.borderWidth ? 'solid' : undefined,
+    borderWidth: node.style.borderWidth ? `${node.style.borderWidth}px` : undefined,
+    borderRadius: node.style.cornerRadius ? `${node.style.cornerRadius}px` : undefined,
+    fontSize: node.style.fontSize ? `${node.style.fontSize}px` : undefined,
+    opacity: node.style.opacity,
+    justifyContent: alignment(node.style.align),
+    alignItems: crossAlignment(node.style.justify),
     width: dimension(node.width),
     height: dimension(node.height),
   };
+  const gap = node.style.separation ? `${node.style.separation}px` : undefined;
   if (node.name === 'BoxContainer' || node.name === 'SplitContainer') {
     style.display = 'flex';
     style.flexDirection = node.orientation === 'vertical' ? 'column' : 'row';
-    style.gap = 6;
+    style.gap = gap ?? 6;
   }
   if (node.name === 'GridContainer') {
     style.display = 'grid';
     style.gridTemplateColumns = `repeat(${Math.max(1, node.style.columns ?? 1)}, minmax(0, 1fr))`;
-    style.gap = 6;
+    style.gridTemplateRows = node.style.rows
+      ? `repeat(${Math.max(1, node.style.rows)}, minmax(0, auto))`
+      : undefined;
+    style.gap = gap ?? 6;
   }
-  if (node.name === 'ScrollContainer' || node.name === 'PanelContainer' || node.name === 'MarginContainer' || node.name === 'CenterContainer' || node.name === 'TabContainer') {
+  if (
+    node.name === 'ScrollContainer' ||
+    node.name === 'PanelContainer' ||
+    node.name === 'MarginContainer' ||
+    node.name === 'CenterContainer' ||
+    node.name === 'TabContainer' ||
+    node.name === 'DefaultWindow'
+  ) {
     style.display = 'flex';
     style.flexDirection = 'column';
-    style.gap = 6;
+    style.gap = gap ?? 6;
+  }
+  if (node.name === 'CenterContainer') {
+    style.alignItems = 'center';
+    style.justifyContent = 'center';
   }
   return style;
 }
 
-function DesignerNode({ node, depth = 0, onSelect }: { node: XamlDesignNode; depth?: number; onSelect: (node: XamlDesignNode) => void }) {
+function imageStyle(image: XamlImageInfo): CSSProperties {
+  const columns = Math.max(1, image.columns);
+  const rows = Math.max(1, Math.floor(image.height / Math.max(1, image.frameHeight)));
+  const isSheet = columns > 1 || rows > 1;
+  if (isSheet) {
+    return {
+      backgroundImage: `url("${image.uri}")`,
+      backgroundRepeat: 'no-repeat',
+      backgroundPosition: '0 0',
+      backgroundSize: `${columns * 100}% ${rows * 100}%`,
+      imageRendering: 'pixelated',
+    };
+  }
+  const size =
+    image.fit === 'stretch'
+      ? '100% 100%'
+      : image.fit === 'cover'
+        ? 'cover'
+        : image.fit === 'none'
+          ? 'auto'
+          : 'contain';
+  return {
+    backgroundImage: `url("${image.uri}")`,
+    backgroundRepeat: 'no-repeat',
+    backgroundPosition: 'center',
+    backgroundSize: size,
+    imageRendering: 'pixelated',
+  };
+}
+
+function DesignerNode({
+  node,
+  depth = 0,
+  onSelect,
+}: {
+  node: XamlDesignNode;
+  depth?: number;
+  onSelect: (node: XamlDesignNode) => void;
+}) {
   const style = designStyle(node);
-  const label = node.text;
+  const label = node.textResolved ?? node.text;
   const common = {
     className: `xaml-design-node xaml-${node.name.toLowerCase()} ${node.stretch ? 'stretch' : ''}`.trim(),
     style,
@@ -78,30 +166,49 @@ function DesignerNode({ node, depth = 0, onSelect }: { node: XamlDesignNode; dep
       event.stopPropagation();
       onSelect(node);
     },
-    title: `${node.className}${label ? ` · ${label}` : ''}`,
+    title: `${node.className}${node.textKey ? ` · ${node.textKey}` : label ? ` · ${label}` : ''}`,
   };
+  const children = node.children.map((child) => (
+    <DesignerNode key={child.id} node={child} depth={depth + 1} onSelect={onSelect} />
+  ));
+  const image = node.image ? (
+    <span className="xaml-image" style={imageStyle(node.image)} role="img" aria-label={node.image.source ?? node.name} />
+  ) : null;
 
   switch (node.name) {
     case 'DefaultWindow':
       return (
         <div className="xaml-window" style={style}>
-          <div className="xaml-window-title">{node.className}</div>
-          <div className="xaml-window-body">
-            {node.children.map((child) => <DesignerNode key={child.id} node={child} depth={depth + 1} onSelect={onSelect} />)}
-          </div>
+          <div className="xaml-window-title">{label || node.className}</div>
+          <div className="xaml-window-body">{children}</div>
         </div>
       );
     case 'Label':
     case 'RichTextLabel':
-      return <div {...common} className={`${common.className} xaml-label`}>{label || <span className="xaml-placeholder">Label</span>}</div>;
+      return (
+        <div {...common} className={`${common.className} xaml-label`}>
+          {label || <span className="xaml-placeholder">Label</span>}
+          {node.textKey ? <code className="xaml-loc-key">{node.textKey}</code> : null}
+        </div>
+      );
     case 'Button':
       return <button type="button" {...common} className={`${common.className} xaml-button`}>{label || 'Button'}</button>;
     case 'LineEdit':
-      return <div {...common} className={`${common.className} xaml-lineedit`}>{label || 'Text input'}</div>;
+      return (
+        <div {...common} className={`${common.className} xaml-lineedit`}>
+          <span>{label || 'Text input'}</span>
+          <span className="xaml-caret" />
+        </div>
+      );
     case 'TextEdit':
       return <div {...common} className={`${common.className} xaml-textedit`}>{label || 'Multi-line input'}</div>;
     case 'CheckBox':
-      return <label {...common} className={`${common.className} xaml-checkbox`}><span className="xaml-checkbox-box" />{label || 'Checkbox'}</label>;
+      return (
+        <label {...common} className={`${common.className} xaml-checkbox`}>
+          <span className="xaml-checkbox-box" />
+          {label || 'Checkbox'}
+        </label>
+      );
     case 'OptionButton':
       return <div {...common} className={`${common.className} xaml-option`}>{label || 'Option'}<ChevronDown size={12} aria-hidden /></div>;
     case 'Slider':
@@ -109,14 +216,29 @@ function DesignerNode({ node, depth = 0, onSelect }: { node: XamlDesignNode; dep
     case 'ProgressBar':
       return <div {...common} className={`${common.className} xaml-progress`}><span style={{ width: '60%' }} /></div>;
     case 'TextureRect':
+    case 'AnimatedTextureRect':
+    case 'TextureButton':
     case 'SpriteView':
     case 'EntityPrototypeView':
-      return <div {...common} className={`${common.className} xaml-texture`}><LayoutTemplate size={18} aria-hidden /><span>{node.name}</span></div>;
+    case 'Icon':
+      return (
+        <div {...common} className={`${common.className} xaml-texture`}>
+          {image ?? <LayoutTemplate size={18} aria-hidden />}
+          {!image ? <span>{label || node.name}</span> : null}
+        </div>
+      );
+    case 'PanelContainer':
+    case 'MarginContainer':
+      return <div {...common}>{children}</div>;
     case 'TabContainer':
     case 'TabBar':
       return (
         <div {...common} className={`${common.className} xaml-tabs`}>
-          <div className="xaml-tabbar"><span>Tab 1</span><span>Tab 2</span></div>
+          <div className="xaml-tabbar">
+            {(node.children.length > 0 ? node.children : [node]).slice(0, 4).map((child, index) => (
+              <span key={child.id} className={index === 0 ? 'active' : ''}>{child.name || `Tab ${index + 1}`}</span>
+            ))}
+          </div>
           {node.children.map((child) => <DesignerNode key={child.id} node={child} depth={depth + 1} onSelect={onSelect} />)}
         </div>
       );
@@ -126,8 +248,9 @@ function DesignerNode({ node, depth = 0, onSelect }: { node: XamlDesignNode; dep
     default:
       return (
         <div {...common}>
+          {image}
           {node.children.length > 0
-            ? node.children.map((child) => <DesignerNode key={child.id} node={child} depth={depth + 1} onSelect={onSelect} />)
+            ? children
             : label
               ? <span className="xaml-label">{label}</span>
               : null}
@@ -176,6 +299,7 @@ export function XamlStudio({ host }: { host: StudioHost }) {
           <p className="studio-page-sub">
             {view.outline.length} elements · {view.diagnostics.length} diagnostics ·{' '}
             {view.codeBehindHandlers.length} handlers
+            {view.codeBehindNamespace ? ` · ${view.codeBehindNamespace}` : ''}
           </p>
         </div>
         <div className="studio-page-actions">
@@ -209,6 +333,9 @@ export function XamlStudio({ host }: { host: StudioHost }) {
           <Button icon={Code2} size="sm" disabled={!view.codeBehindPath} onClick={() => view.codeBehindPath && host.openCodeBehind(view.codeBehindPath)}>
             Code-behind
           </Button>
+          <Button icon={Braces} size="sm" disabled={!view.codeBehindPath} onClick={() => view.codeBehindPath && host.openCSharp(view.codeBehindPath)}>
+            C# context
+          </Button>
         </div>
       </header>
 
@@ -237,8 +364,12 @@ export function XamlStudio({ host }: { host: StudioHost }) {
           {tab === 'designer' ? (
             <div className="xaml-designer-wrap">
               <div className="xaml-designer-toolbar">
-                <span><LayoutTemplate size={13} aria-hidden /> Approximate RobustToolbox layout</span>
-                {selected ? <code onClick={() => host.openPath(view.filePath, outlineLine(view, selected))}>{selected.className}</code> : null}
+                <span><LayoutTemplate size={13} aria-hidden /> Approximate RobustToolbox layout · resolved Fluent text · sprites</span>
+                {selected ? (
+                  <code onClick={() => host.openPath(view.filePath, selected.sourceLine ?? outlineLine(view, selected))}>
+                    {selected.className}
+                  </code>
+                ) : null}
               </div>
               <div className="xaml-designer">
                 {view.design ? <DesignerNode node={view.design} onSelect={setSelected} /> : <div className="studio-detail-empty small">No root element.</div>}
@@ -318,26 +449,92 @@ export function XamlStudio({ host }: { host: StudioHost }) {
             )}
           </section>
 
+          {selected ? (
+            <section className="studio-card xaml-selected">
+              <header className="studio-card-head">
+                <h3><Layers size={14} aria-hidden /> Selected element</h3>
+                <Badge tone="muted">{selected.name}</Badge>
+              </header>
+              <div className="xaml-selected-body">
+                <code>{selected.className}</code>
+                <button
+                  type="button"
+                  className="inline-path"
+                  onClick={() => host.openPath(view.filePath, selected.sourceLine ?? outlineLine(view, selected))}
+                >
+                  <FileCode2 size={12} aria-hidden /> line {selected.sourceLine ?? outlineLine(view, selected)}
+                </button>
+                {selected.textResolved || selected.text ? (
+                  <div className="xaml-selected-text">
+                    <strong>{selected.textResolved ?? selected.text}</strong>
+                    {selected.textKey ? <em>{selected.textKey}</em> : null}
+                  </div>
+                ) : null}
+                {selected.image ? (
+                  <div className="xaml-selected-image">
+                    <span className="xaml-image-preview" style={imageStyle(selected.image)} />
+                    <div>
+                      <strong>{selected.image.kind}</strong>
+                      <em>{selected.image.source}</em>
+                      <span>{selected.image.frameWidth}×{selected.image.frameHeight} · {selected.image.columns} column(s)</span>
+                    </div>
+                  </div>
+                ) : null}
+                <div className="xaml-attribute-table">
+                  {Object.entries(selected.attributes ?? {}).map(([key, value]) => (
+                    <div key={key}>
+                      <code>{key}</code>
+                      <span>{value}</span>
+                    </div>
+                  ))}
+                  {Object.keys(selected.attributes ?? {}).length === 0 ? (
+                    <div className="table-empty">No attributes on this element.</div>
+                  ) : null}
+                </div>
+              </div>
+            </section>
+          ) : null}
+
           <section className="studio-card">
-            <header className="studio-card-head"><h3><Code2 size={14} aria-hidden /> Code-behind</h3></header>
+            <header className="studio-card-head"><h3><Code2 size={14} aria-hidden /> C# context</h3></header>
             <div className="xaml-codebehind">
               <code>{view.codeBehindPath ?? 'No linked .xaml.cs found'}</code>
               {view.codeBehindExists ? (
-                <Button size="sm" icon={FileCode2} onClick={() => view.codeBehindPath && host.openCodeBehind(view.codeBehindPath)}>
-                  Open C#
-                </Button>
+                <div className="xaml-codebehind-actions">
+                  <Button size="sm" icon={FileCode2} onClick={() => view.codeBehindPath && host.openCodeBehind(view.codeBehindPath)}>
+                    Open C#
+                  </Button>
+                  <Button size="sm" icon={Braces} onClick={() => view.codeBehindPath && host.openCSharp(view.codeBehindPath)}>
+                    Context
+                  </Button>
+                </div>
               ) : null}
+              {view.codeBehindNamespace ? <span className="xaml-namespace">namespace <code>{view.codeBehindNamespace}</code></span> : null}
+              <div className="xaml-csharp-types">
+                {view.codeBehindTypes.map((type) => (
+                  <span key={`${type.name}:${type.line}`}>
+                    <Badge tone={type.partial ? 'success' : 'muted'}>{type.kind}{type.partial ? ' partial' : ''}</Badge>
+                    <code>{type.name}</code>
+                  </span>
+                ))}
+              </div>
               <div className="handler-list">
                 {view.codeBehindHandlers.slice(0, 24).map((handler) => <code key={handler}>{handler}()</code>)}
               </div>
+              {view.codeBehindFields.length > 0 ? (
+                <div className="handler-list">
+                  {view.codeBehindFields.slice(0, 16).map((field) => <code key={`${field.type}:${field.name}`}>{field.type} {field.name}</code>)}
+                </div>
+              ) : null}
             </div>
           </section>
 
           <section className="studio-card xaml-help">
             <header className="studio-card-head"><h3><Sparkles size={14} aria-hidden /> SS14 XAML</h3></header>
             <p>
-              This designer is an approximation, not the engine renderer. Use the source tab for the
-              final say, and check the code-behind handlers before running the client.
+              Localized text is resolved from Fluent and textures or entity sprites are rendered
+              inline. This designer is still an approximation, not the engine renderer; use the
+              source tab for the final say.
             </p>
           </section>
         </aside>
@@ -347,6 +544,7 @@ export function XamlStudio({ host }: { host: StudioHost }) {
 }
 
 function outlineLine(view: NonNullable<StudioHost['xaml']>, node: XamlDesignNode): number {
+  if (node.sourceLine) return node.sourceLine;
   const name = node.name;
   const outline = view.outline.find((item) => item.name === name || item.xname === node.className.split('#')[1]);
   return outline?.line ?? 1;

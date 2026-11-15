@@ -4,6 +4,7 @@ import {
   ChevronRight,
   CircleAlert,
   CircleCheck,
+  Code2,
   Image as ImageIcon,
   Info,
   Layers,
@@ -13,7 +14,7 @@ import {
   Settings2,
 } from 'lucide-react';
 import { StudioLogo } from './Brand';
-import { Badge, IconButton } from './ui';
+import { IconButton } from './ui';
 
 interface TopBarProps {
   project: ProjectInfo | null;
@@ -39,6 +40,8 @@ function viewLabel(view: WorkspaceView, graph: GraphView | null): string | null 
       return view.path.replaceAll('\\', '/').split('/').slice(-2).join('/');
     case 'xaml':
       return view.path.replaceAll('\\', '/').split('/').pop() ?? view.path;
+    case 'csharp':
+      return view.path.replaceAll('\\', '/').split('/').pop() ?? view.path;
     case 'diff':
       return view.payload.title;
     case 'about':
@@ -52,6 +55,7 @@ function ViewIcon({ view }: { view: WorkspaceView }) {
   if (view.kind === 'prototype') return <Layers size={13} aria-hidden />;
   if (view.kind === 'rsi') return <ImageIcon size={13} aria-hidden />;
   if (view.kind === 'xaml') return <Braces size={13} aria-hidden />;
+  if (view.kind === 'csharp') return <Code2 size={13} aria-hidden />;
   if (view.kind === 'about') return <Info size={13} aria-hidden />;
   return null;
 }
@@ -108,9 +112,6 @@ export function TopBar({
       </div>
 
       <div className="studio-topbar-actions">
-        <Badge tone="warning" className="ai-badge" title="SS14 Studio is an AI-generated open-source project">
-          AI-generated
-        </Badge>
         {project ? (
           <button
             type="button"

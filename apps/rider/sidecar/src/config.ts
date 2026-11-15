@@ -28,6 +28,9 @@ export const DEFAULT_CONFIG: StudioConfig = {
   prototypeShowResolved: true,
   autoSidePreview: false,
   defaultGraphEditor: false,
+  xamlIndentSize: 4,
+  rsiMetaIndent: 2,
+  rsiMetaFinalNewline: true,
 };
 
 export const DEFAULT_SETTINGS: RiderSettings = {
@@ -53,6 +56,7 @@ const BOOLEAN_KEYS = [
   'prototypeShowResolved',
   'autoSidePreview',
   'defaultGraphEditor',
+  'rsiMetaFinalNewline',
 ] as const;
 
 export function sanitizeConfig(input: unknown): StudioConfig {
@@ -86,6 +90,12 @@ export function sanitizeConfig(input: unknown): StudioConfig {
     record.graphNodeAccent === 'mono'
   ) {
     config.graphNodeAccent = record.graphNodeAccent;
+  }
+  for (const key of ['xamlIndentSize', 'rsiMetaIndent'] as const) {
+    const value = record[key];
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      config[key] = Math.max(1, Math.min(8, Math.round(value)));
+    }
   }
   // Keep the legacy alias in sync with its canonical setting.
   if (

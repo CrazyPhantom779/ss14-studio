@@ -531,7 +531,18 @@ export function applyRsiOperation(meta: RsiMeta, operation: RsiOperation): RsiOp
   return { meta: next, changed, message, notes };
 }
 
-export function serializeRsiMeta(meta: RsiMeta): string {
+export interface RsiMetaFormatOptions {
+  /** Spaces per indentation level. Defaults to 2. */
+  indent?: number;
+  /** Append a trailing newline. Defaults to true. */
+  finalNewline?: boolean;
+}
+
+export function serializeRsiMeta(
+  meta: RsiMeta,
+  options: RsiMetaFormatOptions = {},
+): string {
+  const indent = Math.max(1, Math.min(8, Math.round(options.indent ?? 2)));
   const output: Record<string, unknown> = {
     version: meta.version ?? 1,
   };
@@ -548,7 +559,8 @@ export function serializeRsiMeta(meta: RsiMeta): string {
     delays: state.delays,
     ...(state.flags ?? {}),
   }));
-  return `${JSON.stringify(output, null, 2)}\n`;
+  const text = JSON.stringify(output, null, indent);
+  return options.finalNewline === false ? text : `${text}\n`;
 }
 
 /** Find PNG files in an RSI directory that no state references. */

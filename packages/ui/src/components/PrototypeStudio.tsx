@@ -7,6 +7,8 @@ import type {
   PrototypeView,
   ResolvedField,
   SpriteInfo,
+  StorageItemView,
+  StorageView,
 } from '@ss14-studio/core';
 import {
   ArrowUpRight,
@@ -18,11 +20,15 @@ import {
   Copy,
   FileCode2,
   GitBranch,
+  GripVertical,
   Image as ImageIcon,
   Info,
   Layers,
+  LayoutGrid,
   Pencil,
   Plus,
+  RotateCcw,
+  Save,
   Scissors,
   Search,
   Sparkles,
@@ -32,10 +38,22 @@ import {
   X,
 } from 'lucide-react';
 import type { StudioHost } from '../lib/host';
+import {
+  buildStorageGrid,
+  placeStorageItems,
+  reorder,
+  storageContents,
+} from '../lib/storage';
+import {
+  emptySpriteLayer,
+  layersFromSprite,
+  spriteComponentFields,
+  type EditableSpriteLayer,
+} from '../lib/sprite';
 import { Badge, Button, Field, IconButton } from './ui';
 import { EntitySprite } from './SpritePreview';
 
-type Tab = 'overview' | 'components' | 'inheritance' | 'partials';
+type Tab = 'overview' | 'components' | 'sprite' | 'storage' | 'inheritance' | 'partials';
 
 function formatValue(value: unknown): string {
   if (value == null) return '—';
@@ -282,6 +300,18 @@ export function PrototypeStudio({ host }: { host: StudioHost }) {
               <button type="button" className={tab === 'components' ? 'active' : ''} onClick={() => setTab('components')}>
                 <Boxes size={13} aria-hidden /> Components <span>{view.resolved.components.length}</span>
               </button>
+              {view.resolved.sprite ? (
+                <button type="button" className={tab === 'sprite' ? 'active' : ''} onClick={() => setTab('sprite')}>
+                  <ImageIcon size={13} aria-hidden /> Sprite
+                  <span>{view.resolved.sprite.layers?.length ?? 1}</span>
+                </button>
+              ) : null}
+              {view.storage ? (
+                <button type="button" className={tab === 'storage' ? 'active' : ''} onClick={() => setTab('storage')}>
+                  <LayoutGrid size={13} aria-hidden /> Storage
+                  <span>{view.storage.items.length}</span>
+                </button>
+              ) : null}
               <button type="button" className={tab === 'inheritance' ? 'active' : ''} onClick={() => setTab('inheritance')}>
                 <GitBranch size={13} aria-hidden /> Inheritance
               </button>
@@ -398,6 +428,14 @@ export function PrototypeStudio({ host }: { host: StudioHost }) {
                 </div>
               ) : null}
 
+              {tab === 'sprite' && view.resolved.sprite ? (
+                <SpriteLayerEditor view={view} host={host} />
+              ) : null}
+
+              {tab === 'storage' && view.storage ? (
+                <StorageEditor view={view} storage={view.storage} host={host} />
+              ) : null}
+
               {tab === 'inheritance' ? (
                 <div className="prototype-overview-grid">
                   <section className="studio-card">
@@ -503,6 +541,432 @@ export function PrototypeStudio({ host }: { host: StudioHost }) {
     </div>
   );
 }
+
+function SpriteLayerEditor({ view, host }: { view: PrototypeView; host: StudioHost }) {
+  const sprite = view.resolved.sprite!;
+  const component = sprite.component ?? 'Sprite';
+  const [layers, setLayers] = useState<EditableSpriteLayer[]>(() => layersFromSprite(sprite));
+  const [dirty, setDirty] = useState(false);
+
+  useEffect(() => {
+    setLayers(layersFromSprite(sprite));
+    setDirty(false);
+  }, [sprite]);
+
+  const update = (index: number, patch: Partial<EditableSpriteLayer>) => {
+    setLayers((current) =>
+      current.map((layer, layerIndex) =>
+        layerIndex === index ? { ...layer, ...patch } : layer,
+      ),
+    );
+    setDirty(true);
+  };
+
+  const save = async () => {
+    const result = await host.applyPrototypeOperation(view.resolved.filePath, {
+      kind: 'setComponentFields',
+      id: view.resolved.id,
+      component,
+      fields: spriteComponentFields(sprite, layers, component),
+    });
+    if (result.ok) setDirty(false);
+  };
+
+  return (
+    <div className="sprite-editor">
+      <section className="studio-card">
+        <header className="studio-card-head">
+          <h3>
+            <Layers size={14} aria-hidden />
+            {component} layers
+          </h3>
+          <Badge tone="muted">{layers.length} layer{layers.length === 1 ? '' : 's'}</Badge>
+          <div className="card-head-actions">
+            <Button
+              size="sm"
+              icon={Plus}
+              disabled={host.readOnly || component === 'Icon'}
+              onClick={() => {
+                setLayers((current) => [...current, emptySpriteLayer(current[0])]);
+                setDirty(true);
+              }}
+            >
+              Add layer
+            </Button>
+            <Button
+              size="sm"
+              variant="primary"
+              icon={Save}
+              disabled={host.readOnly || !dirty}
+              onClick={() => void save()}
+            >
+              Save sprite
+            </Button>
+          </div>
+        </header>
+
+        <div className="sprite-editor-note">
+          <Info size={13} aria-hidden />
+          <span>
+            Each layer can use a different RSI, state, colour, scale and offset.
+            The first layer is the base sprite; extra layers are written under
+            <code>layers:</code> in the YAML.
+          </span>
+        </div>
+
+        <div className="sprite-layer-list">
+          {layers.map((layer, index) => (
+            <div className="sprite-layer-row" key={index}>
+              <div className="sprite-layer-index">
+                <GripVertical size={14} aria-hidden />
+                <strong>{index === 0 ? 'Base' : `Layer ${index + 1}`}</strong>
+              </div>
+              <Field label="RSI path">
+                <input
+                  value={layer.rsi}
+                  placeholder="Textures/Objects/..."
+                  spellCheck={false}
+                  onChange={(event) => update(index, { rsi: event.target.value })}
+                />
+              </Field>
+              <Field label="State">
+                <input
+                  value={layer.state}
+                  placeholder="icon"
+                  spellCheck={false}
+                  onChange={(event) => update(index, { state: event.target.value })}
+                />
+              </Field>
+              <Field label="Colour">
+                <input
+                  value={layer.color}
+                  placeholder="#RRGGBBAA"
+                  spellCheck={false}
+                  onChange={(event) => update(index, { color: event.target.value })}
+                />
+              </Field>
+              <Field label="Scale">
+                <input
+                  value={layer.scale}
+                  inputMode="decimal"
+                  onChange={(event) => update(index, { scale: event.target.value })}
+                />
+              </Field>
+              <Field label="Offset X">
+                <input
+                  value={layer.offsetX}
+                  inputMode="decimal"
+                  onChange={(event) => update(index, { offsetX: event.target.value })}
+                />
+              </Field>
+              <Field label="Offset Y">
+                <input
+                  value={layer.offsetY}
+                  inputMode="decimal"
+                  onChange={(event) => update(index, { offsetY: event.target.value })}
+                />
+              </Field>
+              <label className="sprite-layer-visible">
+                <input
+                  type="checkbox"
+                  checked={layer.visible}
+                  onChange={(event) => update(index, { visible: event.target.checked })}
+                />
+                Visible
+              </label>
+              <IconButton
+                icon={Trash2}
+                label={`Remove layer ${index + 1}`}
+                disabled={host.readOnly || layers.length <= 1}
+                onClick={() => {
+                  setLayers((current) => current.filter((_, layerIndex) => layerIndex !== index));
+                  setDirty(true);
+                }}
+              />
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="studio-card">
+        <header className="studio-card-head">
+          <h3>
+            <ImageIcon size={14} aria-hidden />
+            Current composite
+          </h3>
+          <Badge tone="muted">approximate</Badge>
+        </header>
+        <div className="sprite-composite">
+          <EntitySprite
+            entityId={view.summary.kind === 'entity' ? view.summary.id : null}
+            icons={host.icons}
+            size={96}
+            animate={host.config.animations}
+          />
+          <div>
+            <strong>{spriteLabel(sprite)}</strong>
+            <span>
+              {layers.filter((layer) => layer.visible).length} visible layer(s)
+              {sprite.extra && Object.keys(sprite.extra).length > 0
+                ? ` · ${Object.keys(sprite.extra).length} extra field(s) preserved`
+                : ''}
+            </span>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function StorageEditor({
+  view,
+  storage,
+  host,
+}: {
+  view: PrototypeView;
+  storage: StorageView;
+  host: StudioHost;
+}) {
+  const [adding, setAdding] = useState('');
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const placements = useMemo(() => placeStorageItems(storage), [storage]);
+  const placed = placements.filter((placement) => !placement.overflow);
+  const overflow = placements.filter((placement) => placement.overflow);
+  const columns = Math.max(1, storage.columns);
+  const rows = Math.max(1, storage.rows);
+
+  useEffect(() => {
+    for (const item of storage.items) host.requestIcon(item.id);
+  }, [host.requestIcon, storage.items]);
+
+  const applyContents = (items: readonly StorageItemView[]) =>
+    host.applyPrototypeOperation(view.resolved.filePath, {
+      kind: 'setStorageContents',
+      id: view.resolved.id,
+      contents: storageContents(items),
+    });
+
+  const move = (from: number, to: number) => {
+    if (from === to) return;
+    void applyContents(reorder(storage.items, from, to));
+  };
+
+  const addItem = () => {
+    const id = adding.trim();
+    if (!id) return;
+    void applyContents([
+      ...storage.items,
+      {
+        id,
+        index: storage.items.length,
+        name: id,
+        kind: null,
+        sprite: null,
+        slot: null,
+        footprint: { width: 1, height: 1 },
+      },
+    ]);
+    setAdding('');
+  };
+
+  const resize = (nextColumns: number, nextRows: number) => {
+    void host.applyPrototypeOperation(view.resolved.filePath, {
+      kind: 'setStorageGrid',
+      id: view.resolved.id,
+      grid: buildStorageGrid(nextColumns, nextRows),
+    });
+  };
+
+  return (
+    <div className="storage-editor">
+      <section className="studio-card">
+        <header className="studio-card-head">
+          <h3>
+            <LayoutGrid size={14} aria-hidden />
+            Storage grid
+          </h3>
+          <Badge tone="muted">
+            {storage.items.length}/{storage.capacity} slots
+          </Badge>
+          <div className="card-head-actions">
+            <Button size="sm" icon={Plus} disabled={host.readOnly} onClick={() => resize(columns + 1, rows)}>
+              Add column
+            </Button>
+            <Button size="sm" icon={Plus} disabled={host.readOnly} onClick={() => resize(columns, rows + 1)}>
+              Add row
+            </Button>
+            <Button
+              size="sm"
+              icon={RotateCcw}
+              disabled={host.readOnly || (columns === 8 && rows === 4)}
+              onClick={() => resize(8, 4)}
+            >
+              Reset 8×4
+            </Button>
+          </div>
+        </header>
+
+        <div className="storage-meta">
+          <span>{columns} × {rows} grid</span>
+          <span>max item size: {storage.maxItemSize ?? 'default'}</span>
+          <span>{storage.hasStorage ? 'Storage component' : 'StorageFill only'}</span>
+        </div>
+
+        <div
+          className="storage-grid"
+          style={{
+            gridTemplateColumns: `repeat(${columns}, 42px)`,
+            gridTemplateRows: `repeat(${rows}, 42px)`,
+          }}
+          onDragOver={(event) => event.preventDefault()}
+          onDrop={(event) => {
+            event.preventDefault();
+            if (dragIndex != null) move(dragIndex, storage.items.length - 1);
+            setDragIndex(null);
+          }}
+        >
+          {Array.from({ length: columns * rows }, (_, index) => (
+            <span
+              className="storage-cell"
+              key={`cell:${index}`}
+              style={{
+                gridColumn: `${(index % columns) + 1}`,
+                gridRow: `${Math.floor(index / columns) + 1}`,
+              }}
+            />
+          ))}
+          {placed.map((placement) => (
+            <button
+              type="button"
+              key={`${placement.item.index}:${placement.item.id}`}
+              className={`storage-item ${dragIndex === placement.item.index ? 'dragging' : ''}`}
+              style={{
+                gridColumn: `${placement.x + 1} / span ${placement.width}`,
+                gridRow: `${placement.y + 1} / span ${placement.height}`,
+              }}
+              draggable={!host.readOnly}
+              onDragStart={() => setDragIndex(placement.item.index)}
+              onDragEnd={() => setDragIndex(null)}
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                if (dragIndex != null) move(dragIndex, placement.item.index);
+                setDragIndex(null);
+              }}
+              title={`${placement.item.id}${placement.item.amount && placement.item.amount !== 1 ? ` ×${placement.item.amount}` : ''} — drag to reorder`}
+            >
+              <EntitySprite entityId={placement.item.id} icons={host.icons} size={30} />
+              <span>{placement.item.name}</span>
+              {placement.item.amount && placement.item.amount !== 1 ? <em>×{placement.item.amount}</em> : null}
+              {!host.readOnly ? (
+                <span
+                  className="storage-remove"
+                  role="button"
+                  tabIndex={0}
+                  title="Remove from StorageFill"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void applyContents(storage.items.filter((item) => item.index !== placement.item.index));
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.stopPropagation();
+                      void applyContents(storage.items.filter((item) => item.index !== placement.item.index));
+                    }
+                  }}
+                >
+                  <X size={10} aria-hidden />
+                </span>
+              ) : null}
+            </button>
+          ))}
+        </div>
+
+        <form
+          className="storage-add"
+          onSubmit={(event) => {
+            event.preventDefault();
+            addItem();
+          }}
+        >
+          <Field label="Spawn an entity inside">
+            <input
+              value={adding}
+              placeholder="e.g. ToolboxEmergency, ClothingBackpack"
+              spellCheck={false}
+              onChange={(event) => setAdding(event.target.value)}
+            />
+          </Field>
+          <Button icon={Plus} type="submit" disabled={host.readOnly || !adding.trim()}>
+            Add item
+          </Button>
+        </form>
+
+        {overflow.length > 0 ? (
+          <div className="storage-overflow">
+            <div className="card-subhead">Does not fit</div>
+            {overflow.map((placement) => (
+              <button
+                type="button"
+                key={`overflow:${placement.item.index}`}
+                draggable={!host.readOnly}
+                onDragStart={() => setDragIndex(placement.item.index)}
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={() => {
+                  if (dragIndex != null) move(dragIndex, placement.item.index);
+                  setDragIndex(null);
+                }}
+                onClick={() => void applyContents(storage.items.filter((item) => item.index !== placement.item.index))}
+              >
+                <EntitySprite entityId={placement.item.id} icons={host.icons} size={22} />
+                <span>{placement.item.name}</span>
+                <em>remove</em>
+              </button>
+            ))}
+          </div>
+        ) : null}
+      </section>
+
+      <section className="studio-card">
+        <header className="studio-card-head">
+          <h3>
+            <Sparkles size={14} aria-hidden />
+            Approximate in-game storage
+          </h3>
+          <Badge tone="muted">preview</Badge>
+        </header>
+        <div className="storage-preview">
+          <div className="storage-preview-head">
+            <strong>{view.resolved.name || view.summary.id}</strong>
+            <span>{storage.items.length} items · {storage.capacity} slots</span>
+          </div>
+          <div className="storage-preview-grid" style={{ gridTemplateColumns: `repeat(${columns}, 1fr)` }}>
+            {placed.map((placement) => (
+              <span
+                key={`preview:${placement.item.index}`}
+                className="storage-preview-item"
+                style={{
+                  gridColumn: `${placement.x + 1} / span ${placement.width}`,
+                  gridRow: `${placement.y + 1} / span ${placement.height}`,
+                }}
+                title={placement.item.id}
+              >
+                <EntitySprite entityId={placement.item.id} icons={host.icons} size={24} />
+              </span>
+            ))}
+          </div>
+          <p>
+            Drag items in the grid to change their order in <code>StorageFill.contents</code>.
+            The engine places entries in that order; exact rotations and multi-cell
+            packing are approximated.
+          </p>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 
 function FieldRow({
   field,

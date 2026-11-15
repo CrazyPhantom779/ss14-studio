@@ -238,6 +238,257 @@ describe('prototype editing', () => {
   });
 });
 
+describe('prototype helper diagnostics', () => {
+  it('warns about component suffixes, PascalCase keys and redundant overrides', () => {
+    const parsed = parse(`- type: entity
+  id: HelperBase
+  components:
+  - type: Sprite
+    sprite: /Textures/Objects/helper.rsi
+    state: icon
+  - type: Item
+    size: Small
+    Shape: [1, 1]
+
+- type: entity
+  id: HelperChild
+  parent: HelperBase
+  InvalidField: true
+  components:
+  - type: Sprite
+    sprite: /Textures/Objects/helper.rsi
+    state: icon
+  - type: ItemComponent
+    size: Small
+`);
+    expect(parsed.diagnostics.map((diagnostic) => diagnostic.code)).toEqual(
+      expect.arrayContaining([
+        'prototype.field.case',
+        'prototype.component.fieldCase',
+        'prototype.component.suffix',
+      ]),
+    );
+    expect(
+      parsed.diagnostics.find((diagnostic) => diagnostic.code === 'prototype.component.suffix')
+        ?.message,
+    ).toContain('Item');
+    const resolved = new PrototypeRegistry(parsed.prototypes).resolve('HelperChild')!;
+    expect(resolved.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'prototype.component.redundant',
+          severity: 'warning',
+        }),
+      ]),
+    );
+  });
+
+  it('does not flag components that genuinely override an inherited field', () => {
+    const parsed = parse();
+    const resolved = new PrototypeRegistry(parsed.prototypes).resolve('ChildItem')!;
+    expect(
+      resolved.diagnostics.some(
+        (diagnostic) => diagnostic.code === 'prototype.component.redundant',
+      ),
+    ).toBe(false);
+  });
+});
+
+describe('prototype component and storage editing', () => {
+  const storageSource = `- type: entity
+  id: StorageBox
+  components:
+  - type: Storage
+    maxItemSize: Normal
+    grid:
+    - 0,0,1,1
+    - 1,0,1,1
+  - type: StorageFill
+    contents:
+    - ToolboxEmergency
+`;
+
+  it('replaces the complete field set of a component', () => {
+    const edited = apply(source, {
+      kind: 'setComponentFields',
+      id: 'ChildItem',
+      component: 'Tool',
+      fields: { speed: 5, useSound: '/Audio/Items/tool.ogg' },
+    });
+    const parsed = parse(edited).prototypes.find((prototype) => prototype.id === 'ChildItem')!;
+    expect(parsed.components.find((component) => component.type === 'Tool')?.fields).toEqual({
+      speed: 5,
+      useSound: '/Audio/Items/tool.ogg',
+    });
+    expect(parsed.components.map((component) => component.type)).toEqual(['Item', 'Tool']);
+    expect(parsed.fields.name).toBe('child-item');
+  });
+
+  it('adds a component when setComponentFields targets a missing type', () => {
+    const edited = apply(source, {
+      kind: 'setComponentFields',
+      id: 'ChildItem',
+      component: 'Anchorable',
+      fields: { anchored: true, fixToTile: false },
+    });
+    const parsed = parse(edited).prototypes.find((prototype) => prototype.id === 'ChildItem')!;
+    expect(parsed.components.find((component) => component.type === 'Anchorable')?.fields).toEqual({
+      anchored: true,
+      fixToTile: false,
+    });
+  });
+
+  it('rewrites StorageFill contents while preserving Storage fields', () => {
+    const edited = apply(storageSource, {
+      kind: 'setStorageContents',
+      id: 'StorageBox',
+      contents: [
+        { id: 'ToolboxEmergency', amount: 2, prob: 0.5, orGroup: 'tools' },
+        { id: 'ClothingBackpack' },
+      ],
+    });
+    const prototype = parse(edited).prototypes.find((candidate) => candidate.id === 'StorageBox')!;
+    expect(
+      prototype.components.find((component) => component.type === 'StorageFill')?.fields.contents,
+    ).toEqual([
+      { id: 'ToolboxEmergency', amount: 2, prob: 0.5, orGroup: 'tools' },
+      { id: 'ClothingBackpack' },
+    ]);
+    expect(prototype.components.find((component) => component.type === 'Storage')?.fields).toMatchObject({
+      maxItemSize: 'Normal',
+      grid: ['0,0,1,1', '1,0,1,1'],
+    });
+  });
+
+  it('adds StorageFill when the prototype has none', () => {
+    const edited = apply(
+      `- type: entity
+  id: BareBox
+  components:
+  - type: Storage
+    grid:
+    - 0,0,1,1
+`,
+      {
+        kind: 'setStorageContents',
+        id: 'BareBox',
+        contents: [{ id: 'ToolboxEmergency' }],
+      },
+    );
+    const prototype = parse(edited).prototypes.find((candidate) => candidate.id === 'BareBox')!;
+    expect(prototype.components.map((component) => component.type).sort()).toEqual([
+      'Storage',
+      'StorageFill',
+    ]);
+    expect(
+      prototype.components.find((component) => component.type === 'StorageFill')?.fields.contents,
+    ).toEqual([{ id: 'ToolboxEmergency' }]);
+  });
+
+  it('rewrites the Storage grid while preserving other Storage fields', () => {
+    const edited = apply(storageSource, {
+      kind: 'setStorageGrid',
+      id: 'StorageBox',
+      grid: ['0,0,1,1', '1,0,1,1', '0,1,1,1'],
+    });
+    const prototype = parse(edited).prototypes.find((candidate) => candidate.id === 'StorageBox')!;
+    expect(prototype.components.find((component) => component.type === 'Storage')?.fields).toMatchObject({
+      maxItemSize: 'Normal',
+      grid: ['0,0,1,1', '1,0,1,1', '0,1,1,1'],
+    });
+    expect(
+      prototype.components.find((component) => component.type === 'StorageFill')?.fields.contents,
+    ).toEqual(['ToolboxEmergency']);
+  });
+});
+
+describe('inherited layered sprites', () => {
+  it('inherits layers and applies child colour, scale, offset and rotation', () => {
+    const parsed = parse(`- type: entity
+  id: LayeredBase
+  components:
+  - type: Sprite
+    sprite: /Textures/Objects/layered.rsi
+    layers:
+    - state: base
+    - state: overlay
+      color: '#ff0000'
+
+- type: entity
+  id: LayeredChild
+  parent: LayeredBase
+  components:
+  - type: Sprite
+    color: '#00ff00'
+    scale: 2
+    offset: 0.25, -0.5
+    rotation: 90
+`);
+    const resolved = new PrototypeRegistry(parsed.prototypes).resolve('LayeredChild')!;
+    const sprite = extractSprite(resolved.components, resolved.fields)!;
+    expect(sprite).toMatchObject({
+      rsi: 'Textures/Objects/layered.rsi',
+      state: 'base',
+      layerState: 'base',
+      color: '#00ff00',
+      scale: 2,
+      offset: { x: 0.25, y: -0.5 },
+      rotation: 90,
+      visible: true,
+      component: 'Sprite',
+      texture: null,
+    });
+    expect(sprite.layers).toHaveLength(2);
+    expect(sprite.layers![0]).toMatchObject({
+      index: 0,
+      rsi: 'Textures/Objects/layered.rsi',
+      state: 'base',
+      color: '#00ff00',
+      scale: 2,
+      offset: { x: 0.25, y: -0.5 },
+      visible: true,
+    });
+    expect(sprite.layers![1]).toMatchObject({
+      index: 1,
+      state: 'overlay',
+      color: '#ff0000',
+      scale: 2,
+      offset: { x: 0.25, y: -0.5 },
+    });
+    expect(sprite.layers![1]?.fields).toEqual({ state: 'overlay', color: '#ff0000' });
+  });
+
+  it('honours a hidden child sprite and direct texture layers', () => {
+    const sprite = extractSprite(
+      [
+        {
+          type: 'Sprite',
+          fields: {
+            visible: false,
+            layers: [{ texture: 'Textures/Objects/overlay.png', scale: 0.5 }],
+          },
+          sourceId: 'TextureLayer',
+          sourceFile: 'texture.yml',
+          contributors: ['TextureLayer'],
+          fieldOrigins: {},
+          tags: [],
+          ownFields: [],
+          inherited: false,
+        },
+      ],
+      {},
+    )!;
+    expect(sprite.visible).toBe(false);
+    expect(sprite.rsi).toBe('Textures/Objects/overlay.png');
+    expect(sprite.texture).toBe('Textures/Objects/overlay.png');
+    expect(sprite.layers![0]).toMatchObject({
+      state: 'icon',
+      scale: 0.5,
+      visible: true,
+    });
+  });
+});
+
 describe('Fluent parsing', () => {
   it('joins indented values and resets at comments and blank lines', () => {
     const entries = parseFluent(`# heading

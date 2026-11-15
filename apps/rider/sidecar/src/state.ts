@@ -74,10 +74,26 @@ async function readJson(path: string): Promise<unknown> {
   }
 }
 
+let writeSequence = 0;
+const writeQueues = new Map<string, Promise<void>>();
+
 async function writeJson(path: string, value: unknown): Promise<void> {
-  const temporary = `${path}.tmp`;
-  await fs.writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
-  await fs.rename(temporary, path);
+  // Serialize writes per file: callers such as setLayout save in the
+  // background, so two writes to the same path can otherwise race on the
+  // temporary file and fail with ENOENT on rename.
+  const previous = writeQueues.get(path) ?? Promise.resolve();
+  const next = previous
+    .catch(() => undefined)
+    .then(async () => {
+      const temporary = `${path}.${process.pid}.${++writeSequence}.tmp`;
+      await fs.writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+      await fs.rename(temporary, path);
+    })
+    .finally(() => {
+      if (writeQueues.get(path) === next) writeQueues.delete(path);
+    });
+  writeQueues.set(path, next);
+  return next;
 }
 
 async function canWrite(path: string): Promise<boolean> {

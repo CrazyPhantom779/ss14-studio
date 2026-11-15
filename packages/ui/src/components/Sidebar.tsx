@@ -11,6 +11,7 @@ import {
   Boxes,
   Braces,
   CircleAlert,
+  Code2,
   GitBranch,
   Image as ImageIcon,
   Info,
@@ -39,6 +40,7 @@ interface SidebarProps {
   onDocs: () => void;
   onPickRsi: () => void;
   onPickXaml: () => void;
+  onPickCSharp: () => void;
   onAbout: () => void;
   onSettings: () => void;
 }
@@ -82,6 +84,7 @@ export function Sidebar({
   onDocs,
   onPickRsi,
   onPickXaml,
+  onPickCSharp,
   onAbout,
   onSettings,
 }: SidebarProps) {
@@ -349,6 +352,9 @@ export function Sidebar({
         </button>
         <button type="button" onClick={onPickXaml} title="Open a RobustToolbox XAML file">
           <Braces size={13} aria-hidden /> XAML studio
+        </button>
+        <button type="button" onClick={onPickCSharp} title="Explore a C# file's namespace, partials and XAML links">
+          <Code2 size={13} aria-hidden /> C# context
         </button>
         <button type="button" onClick={onAbout} title="About SS14 Studio and AI disclosure">
           <Info size={13} aria-hidden /> About

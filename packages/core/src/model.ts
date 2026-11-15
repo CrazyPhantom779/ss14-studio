@@ -211,11 +211,35 @@ export interface StudioConfig {
   autoSidePreview: boolean;
   /** Whether SS14 Studio is registered as the preferred editor for graphs. */
   defaultGraphEditor: boolean;
+  /** Spaces per indentation level when formatting XAML. */
+  xamlIndentSize: number;
+  /** Spaces per indentation level when writing RSI meta.json. */
+  rsiMetaIndent: number;
+  /** Include a trailing newline when writing RSI meta.json. */
+  rsiMetaFinalNewline: boolean;
 }
 
 /* ------------------------------------------------------------------ */
 /* Prototype model                                                     */
 /* ------------------------------------------------------------------ */
+
+export interface SpriteLayerInfo {
+  /** Zero-based layer index inside the Sprite component. */
+  index: number;
+  /** Resource path beginning with Textures/, without a leading slash. */
+  rsi: string | null;
+  /** State name inside the RSI. */
+  state: string | null;
+  /** Resource path for a non-RSI texture (e.g. a direct PNG). */
+  texture: string | null;
+  color: string | null;
+  scale: number | null;
+  offset: { x: number; y: number } | null;
+  visible: boolean;
+  map: string | null;
+  /** Raw layer mapping, preserved for editing. */
+  fields: Record<string, unknown>;
+}
 
 export interface SpriteInfo {
   /** Resource path beginning with Textures/, without a leading slash. */
@@ -226,10 +250,17 @@ export interface SpriteInfo {
   layerState?: string | null;
   color?: string | null;
   scale?: number | null;
+  offset?: { x: number; y: number } | null;
+  rotation?: number | null;
+  visible?: boolean;
   /** Component the sprite was read from, usually Sprite or Icon. */
   component?: string;
   /** Resource path for a non-RSI texture (e.g. icon PNG). */
   texture?: string | null;
+  /** Resolved draw layers, including the base layer at index 0. */
+  layers?: SpriteLayerInfo[];
+  /** Other Sprite fields that affect rendering but are not edited directly. */
+  extra?: Record<string, unknown>;
 }
 
 export interface PrototypeComponent {
@@ -387,6 +418,54 @@ export interface PartialContribution {
   tags: string[];
 }
 
+export interface StorageGridCell {
+  /** Zero-based row-major slot index. */
+  index: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  /** Original grid entry, preserved when writing. */
+  raw: string;
+}
+
+export interface StorageContentInput {
+  id: string;
+  amount?: number;
+  prob?: number;
+  orGroup?: string;
+  /** Extra fields on the StorageFill content entry. */
+  extra?: Record<string, unknown>;
+}
+
+export interface StorageItemView extends StorageContentInput {
+  /** Index in the StorageFill contents sequence. */
+  index: number;
+  name: string;
+  /** Entity prototype kind, when it resolves. */
+  kind: string | null;
+  sprite: SpriteInfo | null;
+  /** Approximate slot occupied in the storage grid. */
+  slot: number | null;
+  /** Approximate item footprint in grid cells. */
+  footprint: { width: number; height: number };
+}
+
+export interface StorageView {
+  component: 'Storage' | 'StorageFill' | null;
+  /** True when the prototype has a Storage component. */
+  hasStorage: boolean;
+  /** True when the prototype has a StorageFill component. */
+  hasFill: boolean;
+  grid: StorageGridCell[];
+  columns: number;
+  rows: number;
+  items: StorageItemView[];
+  maxItemSize: string | null;
+  capacity: number;
+  diagnostics: Diagnostic[];
+}
+
 export interface PrototypeView {
   key: string;
   summary: PrototypeSummary;
@@ -395,6 +474,7 @@ export interface PrototypeView {
   children: PrototypeSummary[];
   partials: PartialContribution[];
   diagnostics: Diagnostic[];
+  storage: StorageView | null;
 }
 
 export interface LocalizationEntry {
@@ -408,6 +488,15 @@ export type PrototypeOperation =
   | { kind: 'addComponent'; id: string; component: string; fields?: Record<string, unknown> }
   | { kind: 'removeComponent'; id: string; component: string }
   | { kind: 'setComponentField'; id: string; component: string; field: string; value: string | number | boolean | null }
+  | {
+      kind: 'setComponentFields';
+      id: string;
+      component: string;
+      /** Complete field mapping for the component override. */
+      fields: Record<string, unknown>;
+    }
+  | { kind: 'setStorageContents'; id: string; contents: StorageContentInput[] }
+  | { kind: 'setStorageGrid'; id: string; grid: string[] }
   | { kind: 'extractPartial'; id: string; fields: string[]; components: string[] };
 
 /* ------------------------------------------------------------------ */
@@ -529,6 +618,21 @@ export interface XamlDiagnostic extends Diagnostic {
   element?: string;
 }
 
+export interface XamlImageInfo {
+  /** Data URL for a texture or cropped sprite sheet. */
+  uri: string;
+  width: number;
+  height: number;
+  frameWidth: number;
+  frameHeight: number;
+  columns: number;
+  /** How the image should be fitted inside the control. */
+  fit: 'contain' | 'cover' | 'stretch' | 'none';
+  /** Source resource path or entity id, for diagnostics and links. */
+  source: string | null;
+  kind: 'texture' | 'entity' | 'sprite';
+}
+
 export interface XamlDesignNode {
   id: string;
   name: string;
@@ -537,18 +641,38 @@ export interface XamlDesignNode {
   height: string | null;
   orientation: 'horizontal' | 'vertical' | null;
   stretch: boolean;
+  /** Raw text or localization markup from the XAML attribute. */
   text: string | null;
+  /** Resolved display text after Fluent lookup. */
+  textResolved?: string | null;
+  /** Fluent key when the text came from a {Loc ...} markup. */
+  textKey?: string | null;
   tooltip: string | null;
+  tooltipResolved?: string | null;
+  /** Source line of the opening tag. */
+  sourceLine?: number;
+  /** Every attribute on the element, preserving unknown control properties. */
+  attributes?: Record<string, string>;
+  /** Resolved texture or entity sprite. */
+  image?: XamlImageInfo | null;
   style: {
     margin?: string;
     padding?: string;
     color?: string;
     background?: string;
     border?: string;
+    borderColor?: string;
+    borderWidth?: number;
+    cornerRadius?: number;
     align?: string;
     justify?: string;
     columns?: number;
     rows?: number;
+    separation?: number;
+    fontSize?: number;
+    opacity?: number;
+    /** CSS filter derived from Modulate when the colour cannot be applied directly. */
+    filter?: string;
   };
   children: XamlDesignNode[];
 }
@@ -562,6 +686,9 @@ export interface XamlView {
   codeBehindPath: string | null;
   codeBehindExists: boolean;
   codeBehindHandlers: string[];
+  codeBehindFields: { name: string; type: string }[];
+  codeBehindNamespace: string | null;
+  codeBehindTypes: CSharpTypeInfo[];
   outline: { name: string; depth: number; xname: string | null; line: number }[];
   diagnostics: XamlDiagnostic[];
   completions: XamlCompletion[];
@@ -619,12 +746,68 @@ export interface DiffPayload {
 /* Additional host protocol                                            */
 /* ------------------------------------------------------------------ */
 
+/* ------------------------------------------------------------------ */
+/* C# model                                                            */
+/* ------------------------------------------------------------------ */
+
+export interface CSharpTypeInfo {
+  name: string;
+  kind: 'class' | 'struct' | 'record' | 'interface' | 'enum' | 'unknown';
+  partial: boolean;
+  baseTypes: string[];
+  line: number;
+  /** Namespace declared in the file. */
+  namespace: string | null;
+  /** File path for declarations from other files. */
+  filePath?: string;
+  relativePath?: string;
+}
+
+export interface CSharpFileInfo {
+  filePath: string;
+  relativePath: string;
+  source: string;
+  namespace: string | null;
+  usings: string[];
+  types: CSharpTypeInfo[];
+  /** True when this file declares the same type as the linked XAML x:Class. */
+  linkedXaml: string | null;
+}
+
+export interface CSharpPeer {
+  filePath: string;
+  relativePath: string;
+  typeName: string;
+  partial: boolean;
+  line: number;
+  namespace: string | null;
+}
+
+export interface CSharpView {
+  filePath: string;
+  relativePath: string;
+  source: string;
+  namespace: string | null;
+  usings: string[];
+  types: CSharpTypeInfo[];
+  /** Other files declaring the same type name in the same namespace. */
+  partialSiblings: CSharpPeer[];
+  /** Other types sharing this file's namespace. */
+  namespacePeers: CSharpPeer[];
+  /** XAML files whose x:Class points at a type in this file. */
+  linkedXaml: { filePath: string; relativePath: string; className: string }[];
+  /** Files with a matching .xaml.cs suffix, if this is a code-behind file. */
+  linkedCodeBehind: string | null;
+  diagnostics: Diagnostic[];
+}
+
 export type WorkspaceView =
   | { kind: 'dashboard' }
   | { kind: 'graph'; key: string }
   | { kind: 'prototype'; id: string; kindFilter?: string }
   | { kind: 'rsi'; path: string }
   | { kind: 'xaml'; path: string }
+  | { kind: 'csharp'; path: string }
   | { kind: 'diff'; payload: DiffPayload }
   | { kind: 'about' };
 
@@ -754,6 +937,19 @@ export type HostMessage =
         frameHeight: number;
         columns: number;
       };
+      /** Resolved draw layers, base layer first. */
+      layers?: {
+        uri: string;
+        width: number;
+        height: number;
+        frameWidth: number;
+        frameHeight: number;
+        columns: number;
+        color?: string | null;
+        scale?: number | null;
+        offset?: { x: number; y: number } | null;
+        visible?: boolean;
+      }[];
     }
   | { type: 'indexProgress'; message: string; done: number; total: number }
   | { type: 'theme'; kind: 'dark' | 'light' | 'high-contrast' }
@@ -761,6 +957,7 @@ export type HostMessage =
   | { type: 'prototype'; view: PrototypeView | null; message?: string }
   | { type: 'rsi'; view: RsiView | null; message?: string }
   | { type: 'xaml'; view: XamlView | null; message?: string }
+  | { type: 'csharp'; view: CSharpView | null; message?: string }
   | { type: 'diff'; payload: DiffPayload }
   | { type: 'view'; view: WorkspaceView }
   | { type: 'selection'; text: string }
@@ -784,8 +981,10 @@ export type WebviewMessage =
   | { type: 'openPrototype'; id: string; kind?: string }
   | { type: 'openRsi'; path: string }
   | { type: 'openXaml'; path: string }
+  | { type: 'openCSharp'; path: string }
   | { type: 'pickRsi' }
   | { type: 'pickXaml' }
+  | { type: 'pickCSharp' }
   | { type: 'openPath'; path: string; line?: number }
   | { type: 'openAbout' }
   | { type: 'requestDiff'; title: string; oldText: string; newText: string; oldLabel?: string; newLabel?: string }

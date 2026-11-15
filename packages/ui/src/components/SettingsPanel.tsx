@@ -149,6 +149,60 @@ export function SettingsPanel({ host, onClose }: SettingsPanelProps) {
             </label>
           </section>
 
+          <section className="settings-group">
+            <header>
+              <SlidersHorizontal size={14} aria-hidden />
+              <h3>Formatting</h3>
+            </header>
+            <label className="settings-select">
+              <span>
+                <strong>XAML indent size</strong>
+                <em>Spaces per indentation level used by Format and Clean up.</em>
+              </span>
+              <input
+                type="number"
+                min={1}
+                max={8}
+                step={1}
+                value={host.config.xamlIndentSize}
+                onChange={(event) => {
+                  const value = Math.max(1, Math.min(8, Number(event.target.value) || 4));
+                  host.saveConfig({ xamlIndentSize: value });
+                }}
+              />
+            </label>
+            <label className="settings-select">
+              <span>
+                <strong>RSI meta indent size</strong>
+                <em>Spaces per indentation level when SS14 Studio writes meta.json.</em>
+              </span>
+              <input
+                type="number"
+                min={1}
+                max={8}
+                step={1}
+                value={host.config.rsiMetaIndent}
+                onChange={(event) => {
+                  const value = Math.max(1, Math.min(8, Number(event.target.value) || 2));
+                  host.saveConfig({ rsiMetaIndent: value });
+                }}
+              />
+            </label>
+            <label className="settings-toggle">
+              <span>
+                <strong>RSI meta trailing newline</strong>
+                <em>End meta.json with a newline when the studio saves it.</em>
+              </span>
+              <input
+                type="checkbox"
+                checked={host.config.rsiMetaFinalNewline}
+                onChange={(event) =>
+                  host.saveConfig({ rsiMetaFinalNewline: event.target.checked })
+                }
+              />
+            </label>
+          </section>
+
           <section className="settings-note">
             <Info size={15} aria-hidden />
             <div>

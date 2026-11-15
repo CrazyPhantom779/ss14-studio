@@ -14,6 +14,7 @@ import { Toasts } from './components/Toasts';
 import { PrototypeStudio } from './components/PrototypeStudio';
 import { RsiStudio } from './components/RsiStudio';
 import { XamlStudio } from './components/XamlStudio';
+import { CSharpPanel } from './components/CSharpPanel';
 import { DiffView } from './components/DiffView';
 import { AboutPanel } from './components/AboutPanel';
 import { SettingsPanel } from './components/SettingsPanel';
@@ -74,7 +75,7 @@ export default function App() {
         ? host.graph?.id
         : view.kind === 'prototype'
           ? view.id
-          : view.kind === 'rsi' || view.kind === 'xaml'
+          : view.kind === 'rsi' || view.kind === 'xaml' || view.kind === 'csharp'
             ? view.path.replaceAll('\\', '/').split('/').pop()
             : view.kind === 'about'
               ? 'About'
@@ -146,6 +147,9 @@ export default function App() {
       case 'xaml':
         host.openXaml(target.path);
         break;
+      case 'csharp':
+        host.openCSharp(target.path);
+        break;
       case 'about':
         host.openAbout();
         break;
@@ -153,7 +157,7 @@ export default function App() {
         host.openDashboard();
         break;
     }
-  }, [host.openAbout, host.openDashboard, host.openGraph, host.openPrototype, host.openRsi, host.openXaml]);
+  }, [host.openAbout, host.openCSharp, host.openDashboard, host.openGraph, host.openPrototype, host.openRsi, host.openXaml]);
 
   const mainClass =
     view.kind === 'graph'
@@ -191,6 +195,7 @@ export default function App() {
             onDocs={host.openDocs}
             onPickRsi={host.pickRsi}
             onPickXaml={host.pickXaml}
+            onPickCSharp={host.pickCSharp}
             onAbout={host.openAbout}
             onSettings={() => setSettingsOpen(true)}
           />
@@ -259,6 +264,7 @@ export default function App() {
           {view.kind === 'prototype' ? <PrototypeStudio host={host} /> : null}
           {view.kind === 'rsi' ? <RsiStudio host={host} /> : null}
           {view.kind === 'xaml' ? <XamlStudio host={host} /> : null}
+          {view.kind === 'csharp' ? <CSharpPanel host={host} /> : null}
           {view.kind === 'diff' ? <DiffView host={host} onBack={diffBack} /> : null}
           {view.kind === 'about' ? <AboutPanel host={host} /> : null}
         </main>

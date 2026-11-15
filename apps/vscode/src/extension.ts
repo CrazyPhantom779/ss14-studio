@@ -321,6 +321,10 @@ export async function activate(
     await panel.openXaml(uri.fsPath);
   };
 
+  const openCSharpFile = async (uri: vscode.Uri): Promise<void> => {
+    await panel.openCSharp(uri.fsPath);
+  };
+
   const openRsiFile = async (uri: vscode.Uri): Promise<void> => {
     const dir = await rsiDirectory(uri);
     if (!dir) {
@@ -346,6 +350,10 @@ export async function activate(
     }
     if (/\.xaml$/i.test(path)) {
       await openXamlFile(uri);
+      return;
+    }
+    if (/\.cs$/i.test(path)) {
+      await openCSharpFile(uri);
       return;
     }
     if (/\.rsi\/meta\.json$/i.test(path) || /\.rsi\/.*\.png$/i.test(path)) {
@@ -504,6 +512,13 @@ export async function activate(
     if (/\.xaml$/i.test(path)) {
       await panel.openXaml(document.uri.fsPath, {
         beside,
+        preserveFocus: true,
+      });
+      return;
+    }
+    if (/\.cs$/i.test(path) && !/\.xaml\.cs$/i.test(path)) {
+      await panel.openCSharp(document.uri.fsPath, {
+        beside: true,
         preserveFocus: true,
       });
       return;
@@ -702,6 +717,36 @@ export async function activate(
     ),
 
     vscode.commands.registerCommand(
+      'ss14Studio.openCSharp',
+      async (argument?: unknown) => {
+        const uri = uriFromArgument(argument);
+        if (uri) {
+          await openCSharpFile(uri);
+          return;
+        }
+        const picked = await vscode.window.showOpenDialog({
+          title: 'Open a C# file in SS14 Studio',
+          canSelectFiles: true,
+          canSelectMany: false,
+          openLabel: 'Open C#',
+          filters: { 'C# files': ['cs'] },
+        });
+        if (picked?.[0]) await openCSharpFile(picked[0]);
+      },
+    ),
+
+    vscode.commands.registerCommand(
+      'ss14Studio.openCSharpForFile',
+      async (argument?: unknown) => {
+        const uri =
+          uriFromArgument(argument) ??
+          vscode.window.activeTextEditor?.document.uri;
+        if (!uri) return;
+        await openCSharpFile(uri);
+      },
+    ),
+
+    vscode.commands.registerCommand(
       'ss14Studio.openForFile',
       async (argument?: unknown) => {
         await openForFile(argument);
@@ -809,7 +854,10 @@ export async function activate(
         event.affectsConfiguration('ss14Studio.graphEdgeStyle') ||
         event.affectsConfiguration('ss14Studio.graphNodeAccent') ||
         event.affectsConfiguration('ss14Studio.prototypeCompact') ||
-        event.affectsConfiguration('ss14Studio.prototypeShowResolved')
+        event.affectsConfiguration('ss14Studio.prototypeShowResolved') ||
+        event.affectsConfiguration('ss14Studio.xamlIndentSize') ||
+        event.affectsConfiguration('ss14Studio.rsiMetaIndent') ||
+        event.affectsConfiguration('ss14Studio.rsiMetaFinalNewline')
       ) {
         panel.notifyConfigChanged();
       }

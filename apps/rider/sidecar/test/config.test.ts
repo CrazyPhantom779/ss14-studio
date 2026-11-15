@@ -17,6 +17,9 @@ describe('Rider settings', () => {
       graphNodeAccent: 'hash',
       autoSidePreview: false,
       defaultGraphEditor: false,
+      xamlIndentSize: 4,
+      rsiMetaIndent: 2,
+      rsiMetaFinalNewline: true,
     });
     expect(DEFAULT_SETTINGS).toEqual({
       config: DEFAULT_CONFIG,
@@ -78,6 +81,41 @@ describe('Rider settings', () => {
       entityIcons: false,
       graphSprites: false,
     });
+  });
+
+  it('sanitizes formatting options into the supported range', () => {
+    expect(
+      sanitizeConfig({
+        xamlIndentSize: 2,
+        rsiMetaIndent: 8,
+        rsiMetaFinalNewline: false,
+      }),
+    ).toMatchObject({
+      xamlIndentSize: 2,
+      rsiMetaIndent: 8,
+      rsiMetaFinalNewline: false,
+    });
+    expect(
+      sanitizeConfig({
+        xamlIndentSize: 0,
+        rsiMetaIndent: 99,
+        rsiMetaFinalNewline: 'no',
+      }),
+    ).toMatchObject({
+      xamlIndentSize: 1,
+      rsiMetaIndent: 8,
+      rsiMetaFinalNewline: true,
+    });
+    expect(
+      sanitizeConfig({
+        xamlIndentSize: Number.NaN,
+        rsiMetaIndent: '4',
+      }),
+    ).toMatchObject({
+      xamlIndentSize: DEFAULT_CONFIG.xamlIndentSize,
+      rsiMetaIndent: DEFAULT_CONFIG.rsiMetaIndent,
+    });
+    expect(sanitizeConfig({ xamlIndentSize: 3.7 }).xamlIndentSize).toBe(4);
   });
 
   it('sanitizes top-level preferences', () => {

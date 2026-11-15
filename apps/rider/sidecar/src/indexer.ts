@@ -1,14 +1,18 @@
-import { promises as fs } from 'node:fs';
+import { promises as fs, existsSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import {
+  buildCSharpView,
   collectTagUsage,
   mayContainConstructionGraph,
+  parseCSharpFile,
   parseFluent,
   parseGraphFile,
   parsePrototypeFile,
   PrototypeRegistry,
   validateGraph,
   type ConstructionGraph,
+  type CSharpIndexFile,
+  type CSharpView,
   type GraphSummary,
   type IndexPayload,
   type ParsedGraphFile,
@@ -20,6 +24,7 @@ import {
   type RawPrototype,
   type SpriteInfo,
   type TagUsage,
+  type XamlClassEntry,
 } from '@ss14-studio/core';
 import {
   isDirectory,
@@ -135,6 +140,10 @@ export class ProjectIndex {
   private localization = new Map<string, string>();
   private partialDeclarations: PartialDeclaration[] = [];
   private registry: PrototypeRegistry | null = null;
+  private csharpIndex = new Map<string, CSharpIndexFile>();
+  private xamlClasses: XamlClassEntry[] = [];
+  private csharpScan: Promise<void> | undefined;
+  private csharpGeneration = 0;
   private refreshPromise: Promise<void> | undefined;
   private refreshAgain = false;
   private generation = 0;
@@ -206,6 +215,110 @@ export class ProjectIndex {
   getEntitySprite(entityId: string): SpriteInfo | null {
     this.ensureRegistry();
     return this.registry?.resolve(entityId)?.sprite ?? null;
+  }
+
+  resolveLocalization(key: string): string | undefined {
+    return this.localization.get(key);
+  }
+
+  /**
+   * Lazily scan C# and XAML class declarations. The result is cached until
+   * the next project refresh; the first C# or XAML view pays the scan cost.
+   */
+  async ensureCSharpIndex(): Promise<void> {
+    if (this.csharpScan) return this.csharpScan;
+    const generation = this.csharpGeneration;
+    const scan = (async () => {
+      const csharp = new Map<string, CSharpIndexFile>();
+      const xamlClasses: XamlClassEntry[] = [];
+      for (const root of this.roots) {
+        const csharpFiles = await walkFiles(
+          root.path,
+          (path) => /\.cs$/i.test(path),
+          { maxFiles: 20_000 },
+        );
+        await mapLimit(csharpFiles, 8, async (filePath) => {
+          try {
+            const { text } = await readTextFile(filePath);
+            const relativePath = this.relativePath(filePath);
+            const parsed = parseCSharpFile(text, {
+              filePath,
+              relativePath,
+            });
+            csharp.set(filePath, {
+              filePath,
+              relativePath,
+              namespace: parsed.namespace,
+              types: parsed.types,
+            });
+          } catch {
+            // Ignore unreadable files.
+          }
+        });
+        const xamlFiles = await walkFiles(
+          root.path,
+          (path) => /\.xaml$/i.test(path),
+          { maxFiles: 20_000 },
+        );
+        await mapLimit(xamlFiles, 8, async (filePath) => {
+          try {
+            const { text } = await readTextFile(filePath);
+            const className = /x:Class\s*=\s*"([^"]+)"/.exec(text)?.[1];
+            if (!className) return;
+            xamlClasses.push({
+              filePath,
+              relativePath: this.relativePath(filePath),
+              className,
+            });
+          } catch {
+            // Ignore unreadable files.
+          }
+        });
+      }
+      if (generation === this.csharpGeneration) {
+        this.csharpIndex = csharp;
+        this.xamlClasses = xamlClasses;
+      }
+    })().finally(() => {
+      if (this.csharpScan === scan) this.csharpScan = undefined;
+    });
+    this.csharpScan = scan;
+    return scan;
+  }
+
+  async getCSharpView(
+    filePath: string,
+    text?: string,
+  ): Promise<CSharpView | null> {
+    await this.ensureCSharpIndex();
+    let source = text;
+    if (source == null) {
+      try {
+        source = (await readTextFile(filePath)).text;
+      } catch {
+        return null;
+      }
+    }
+    const file = parseCSharpFile(source, {
+      filePath,
+      relativePath: this.relativePath(filePath),
+    });
+    const exists = (path: string) =>
+      this.csharpIndex.has(path) || existsSync(path);
+    return buildCSharpView(
+      file,
+      [...this.csharpIndex.values()],
+      this.xamlClasses,
+      exists,
+    );
+  }
+
+  getXamlClassEntry(filePath: string): XamlClassEntry | undefined {
+    return this.xamlClasses.find((entry) => entry.filePath === filePath);
+  }
+
+  findXamlClass(className: string): XamlClassEntry | undefined {
+    return this.xamlClasses.find((entry) => entry.className === className);
   }
 
   getGraphsForFile(filePath: string): string[] {
@@ -280,6 +393,8 @@ export class ProjectIndex {
 
   private async doRefresh(): Promise<void> {
     const generation = ++this.generation;
+    this.csharpGeneration++;
+    this.csharpScan = undefined;
     const started = Date.now();
     this.roots = await this.discoverRoots();
     this.callbacks.onStatus?.({

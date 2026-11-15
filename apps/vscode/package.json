@@ -48,6 +48,7 @@
     "onCommand:ss14Studio.openGraph",
     "onCommand:ss14Studio.openPrototype",
     "onCommand:ss14Studio.openForFile",
+    "onCommand:ss14Studio.openCSharp",
     "onCommand:ss14Studio.refreshIndex",
     "onCommand:ss14Studio.createGraph",
     "onCommand:ss14Studio.openAbout"
@@ -136,6 +137,16 @@
         "command": "ss14Studio.openXamlPath",
         "title": "SS14 Studio: Open XAML Path",
         "icon": "$(preview)"
+      },
+      {
+        "command": "ss14Studio.openCSharp",
+        "title": "SS14 Studio: Open C# Context",
+        "icon": "$(symbol-namespace)"
+      },
+      {
+        "command": "ss14Studio.openCSharpForFile",
+        "title": "SS14 Studio: Open C# Context for This File",
+        "icon": "$(symbol-namespace)"
       },
       {
         "command": "ss14Studio.openForFile",
@@ -251,6 +262,11 @@
         {
           "command": "ss14Studio.openXamlForFile",
           "when": "resourceLangId == xaml",
+          "group": "navigation@1"
+        },
+        {
+          "command": "ss14Studio.openCSharpForFile",
+          "when": "resourceExtname == .cs && resourceFilename !=~ /\\.xaml\\.cs$/",
           "group": "navigation@1"
         },
         {
@@ -427,6 +443,25 @@
           "type": "boolean",
           "default": true,
           "description": "Show inherited and resolved component fields by default in the prototype inspector."
+        },
+        "ss14Studio.xamlIndentSize": {
+          "type": "number",
+          "default": 4,
+          "minimum": 1,
+          "maximum": 8,
+          "description": "Spaces per indentation level used by SS14 Studio's XAML formatter and cleanup."
+        },
+        "ss14Studio.rsiMetaIndent": {
+          "type": "number",
+          "default": 2,
+          "minimum": 1,
+          "maximum": 8,
+          "description": "Spaces per indentation level used when SS14 Studio writes RSI meta.json."
+        },
+        "ss14Studio.rsiMetaFinalNewline": {
+          "type": "boolean",
+          "default": true,
+          "description": "Write a trailing newline when SS14 Studio saves RSI meta.json."
         }
       }
     }

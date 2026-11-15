@@ -15,6 +15,7 @@ import type {
   XamlOperation,
   XamlView,
 } from './model.js';
+import { parseCSharpFile } from './csharp.js';
 import { LineIndex } from './yaml.js';
 
 const SS14_NAMESPACE = 'https://spacestation14.io';
@@ -449,22 +450,57 @@ function attr(element: XamlElement, name: string): string | null {
 function designStyle(element: XamlElement): XamlDesignNode['style'] {
   const margin = attr(element, 'Margin');
   const padding = attr(element, 'Padding');
-  const color = attr(element, 'Modulate') ?? attr(element, 'Foreground');
-  const background = attr(element, 'Background') ?? attr(element, 'PanelOverride');
+  const color =
+    attr(element, 'FontColorOverride') ??
+    attr(element, 'Foreground') ??
+    attr(element, 'Modulate');
+  const styleBox = element.children.find((child) =>
+    /^(StyleBoxFlat|StyleBoxTexture|StyleBoxEmpty)$/.test(child.name),
+  );
+  const background =
+    attr(element, 'Background') ??
+    (attr(element, 'PanelOverride') && !attr(element, 'PanelOverride')!.startsWith('{')
+      ? attr(element, 'PanelOverride')
+      : null) ??
+    (styleBox ? attr(styleBox, 'BackgroundColor') : null);
+  const borderColor = styleBox ? attr(styleBox, 'BorderColor') : attr(element, 'BorderColor');
+  const borderThickness = styleBox
+    ? Number(attr(styleBox, 'BorderThickness') ?? '0') || undefined
+    : Number(attr(element, 'BorderThickness') ?? '0') || undefined;
+  const cornerRadius = styleBox
+    ? Number(attr(styleBox, 'CornerRadius') ?? '0') || undefined
+    : undefined;
   const align = attr(element, 'HorizontalAlignment');
   const justify = attr(element, 'VerticalAlignment');
   const columns = Number(attr(element, 'Columns') ?? '0') || undefined;
   const rows = Number(attr(element, 'Rows') ?? '0') || undefined;
+  const separation = Number(attr(element, 'SeparationOverride') ?? attr(element, 'Separation') ?? '0') || undefined;
+  const fontSize = Number(attr(element, 'FontSize') ?? '0') || undefined;
+  const opacity = Number(attr(element, 'Opacity') ?? '1');
   return {
     ...(margin ? { margin } : {}),
     ...(padding ? { padding } : {}),
     ...(color ? { color } : {}),
     ...(background ? { background } : {}),
+    ...(borderColor ? { borderColor } : {}),
+    ...(borderThickness ? { borderWidth: borderThickness } : {}),
+    ...(cornerRadius ? { cornerRadius } : {}),
     ...(align ? { align } : {}),
     ...(justify ? { justify } : {}),
     ...(columns ? { columns } : {}),
     ...(rows ? { rows } : {}),
+    ...(separation ? { separation } : {}),
+    ...(fontSize ? { fontSize } : {}),
+    ...(Number.isFinite(opacity) && opacity !== 1 ? { opacity } : {}),
   };
+}
+
+function attributesOf(element: XamlElement): Record<string, string> {
+  const output: Record<string, string> = {};
+  for (const attribute of element.attributes) {
+    if (!attribute.name.startsWith('xmlns')) output[attribute.name] = attribute.value;
+  }
+  return output;
 }
 
 function toDesign(element: XamlElement, path: string): XamlDesignNode {
@@ -472,6 +508,8 @@ function toDesign(element: XamlElement, path: string): XamlDesignNode {
   const text =
     attr(element, 'Text') ??
     attr(element, 'Placeholder') ??
+    attr(element, 'Title') ??
+    attr(element, 'Label') ??
     (element.children.length === 0 && element.text ? element.text : null);
   const orientationValue = attr(element, 'Orientation')?.toLowerCase();
   const orientation =
@@ -491,10 +529,41 @@ function toDesign(element: XamlElement, path: string): XamlDesignNode {
     orientation,
     stretch: attr(element, 'HorizontalExpand') === 'True' || attr(element, 'VerticalExpand') === 'True',
     text,
+    textResolved: text,
+    textKey: null,
     tooltip: attr(element, 'ToolTip'),
+    tooltipResolved: attr(element, 'ToolTip'),
+    sourceLine: element.startTagSpan.line,
+    attributes: attributesOf(element),
+    image: null,
     style: designStyle(element),
     children: element.children.map((child, index) => toDesign(child, `${path}/${index}`)),
   };
+}
+
+/** Parse RobustToolbox colour strings into a CSS colour where possible. */
+export function robustColorToCss(value: string | null | undefined): string | undefined {
+  if (!value) return undefined;
+  const trimmed = value.trim();
+  if (/^#[0-9a-fA-F]{3}$/.test(trimmed) || /^#[0-9a-fA-F]{6}$/.test(trimmed)) {
+    return trimmed;
+  }
+  if (/^#[0-9a-fA-F]{8}$/.test(trimmed)) {
+    // RobustToolbox stores colours as RRGGBBAA.
+    const red = trimmed.slice(1, 3);
+    const green = trimmed.slice(3, 5);
+    const blue = trimmed.slice(5, 7);
+    const alpha = trimmed.slice(7, 9);
+    return `#${red}${green}${blue}${alpha}`;
+  }
+  if (/^#[0-9a-fA-F]{4}$/.test(trimmed)) {
+    const red = trimmed[1]!;
+    const green = trimmed[2]!;
+    const blue = trimmed[3]!;
+    const alpha = trimmed[4]!;
+    return `#${red}${green}${blue}${alpha}`;
+  }
+  return trimmed;
 }
 
 export interface CodeBehindInfo {
@@ -613,6 +682,12 @@ export function parseXaml(source: string, options: ParseXamlOptions): XamlView {
   let codeBehindSource = options.codeBehindSource ?? null;
   const codeBehindExists = Boolean(options.codeBehindPath && codeBehindSource != null);
   const codeInfo = codeBehindSource ? parseCodeBehind(codeBehindSource) : { handlers: [], fields: [] };
+  const csharpInfo = codeBehindSource && options.codeBehindPath
+    ? parseCSharpFile(codeBehindSource, {
+        filePath: options.codeBehindPath,
+        relativePath: options.codeBehindPath,
+      })
+    : null;
   for (const event of events) {
     if (!codeInfo.handlers.includes(event.handler) && codeBehindSource) {
       diagnostics.push({
@@ -621,6 +696,37 @@ export function parseXaml(source: string, options: ParseXamlOptions): XamlView {
         message: `${event.event} references "${event.handler}", but no matching method exists in the code-behind.`,
         line: event.element.startTagSpan.line,
       });
+    }
+  }
+  if (className && csharpInfo) {
+    const shortName = className.split('.').pop();
+    const declaration = csharpInfo.types.find((type) => type.name === shortName);
+    if (!declaration) {
+      diagnostics.push({
+        severity: 'warning',
+        code: 'xaml.codebehind.class',
+        message: `x:Class "${className}" has no matching type in the code-behind.`,
+        line: root?.startTagSpan.line ?? 1,
+      });
+    } else {
+      if (!declaration.partial) {
+        diagnostics.push({
+          severity: 'warning',
+          code: 'xaml.codebehind.partial',
+          message: `${declaration.name} must be declared partial to connect to ${options.relativePath}.`,
+          line: declaration.line,
+        });
+      }
+      const dot = className.lastIndexOf('.');
+      const expectedNamespace = dot > 0 ? className.slice(0, dot) : null;
+      if (expectedNamespace && csharpInfo.namespace && expectedNamespace !== csharpInfo.namespace) {
+        diagnostics.push({
+          severity: 'warning',
+          code: 'xaml.codebehind.namespace',
+          message: `x:Class namespace "${expectedNamespace}" does not match the code-behind namespace "${csharpInfo.namespace}".`,
+          line: declaration.line,
+        });
+      }
     }
   }
 
@@ -635,6 +741,9 @@ export function parseXaml(source: string, options: ParseXamlOptions): XamlView {
     codeBehindPath: options.codeBehindPath ?? null,
     codeBehindExists,
     codeBehindHandlers: codeInfo.handlers,
+    codeBehindFields: codeInfo.fields,
+    codeBehindNamespace: csharpInfo?.namespace ?? null,
+    codeBehindTypes: csharpInfo?.types ?? [],
     outline,
     diagnostics,
     completions: xamlCompletions(),
@@ -651,8 +760,18 @@ function tagLines(xml: string): string[] {
   return xml.replace(/\r\n/g, '\n').split('\n');
 }
 
-export function formatXaml(source: string): string {
+export interface XamlFormatOptions {
+  /** Spaces per indentation level. Defaults to 4. */
+  indentSize?: number;
+  /** Preserve the source's CRLF line endings. Defaults to true. */
+  preserveEol?: boolean;
+}
+
+export function formatXaml(source: string, options: XamlFormatOptions = {}): string {
   const normalized = source.charCodeAt(0) === 0xfeff ? source.slice(1) : source;
+  const indentSize = Math.max(1, Math.min(8, Math.round(options.indentSize ?? 4)));
+  const indent = ' '.repeat(indentSize);
+  const eol = options.preserveEol !== false && /\r\n/.test(normalized) ? '\r\n' : '\n';
   const lines = tagLines(normalized);
   const output: string[] = [];
   let depth = 0;
@@ -664,7 +783,7 @@ export function formatXaml(source: string): string {
     }
     const closing = /^<\//.test(trimmed);
     if (closing) depth = Math.max(0, depth - 1);
-    output.push(`${'  '.repeat(depth)}${trimmed}`);
+    output.push(`${indent.repeat(depth)}${trimmed}`);
     const opens = (trimmed.match(/<[A-Za-z_][^>]*>/g) ?? []).filter(
       (tag) => !tag.startsWith('</') && !tag.endsWith('/>') && !tag.startsWith('<!') && !tag.startsWith('<?'),
     ).length;
@@ -672,22 +791,27 @@ export function formatXaml(source: string): string {
     if (!closing) depth += Math.max(0, opens - closes);
   }
   while (output.length > 0 && output[output.length - 1] === '') output.pop();
-  return `${output.join('\n')}\n`;
+  return `${output.join(eol)}${eol}`;
 }
 
 export function applyXamlOperation(
   source: string,
   operation: XamlOperation,
   relativePath = 'file.xaml',
+  options: XamlFormatOptions = {},
 ): { text: string; message: string } {
+  const eol = options.preserveEol !== false && /\r\n/.test(source) ? '\r\n' : '\n';
   if (operation.kind === 'format') {
-    return { text: formatXaml(source), message: `Formatted ${relativePath}.` };
+    return {
+      text: formatXaml(source, options),
+      message: `Formatted ${relativePath} with ${Math.max(1, options.indentSize ?? 4)}-space indentation.`,
+    };
   }
   if (operation.kind === 'cleanup') {
-    let text = formatXaml(source);
+    let text = formatXaml(source, options);
     text = text.replace(/[ \t]+$/gm, '');
     if (!/AutoGenerated/i.test(text)) {
-      text = `<!-- AutoGenerated by SS14 Studio. This file may be regenerated. -->\n${text}`;
+      text = `<!-- AutoGenerated by SS14 Studio. This file may be regenerated. -->${eol}${text}`;
     }
     return { text, message: `Cleaned up ${relativePath}.` };
   }
@@ -695,9 +819,9 @@ export function applyXamlOperation(
     if (/AutoGenerated/i.test(source)) {
       return { text: source, message: 'This file is already marked as AutoGenerated.' };
     }
-    const marker = '<!-- AutoGenerated by SS14 Studio. This file may be regenerated. -->\n';
+    const marker = `<!-- AutoGenerated by SS14 Studio. This file may be regenerated. -->${eol}`;
     const text = source.startsWith('<?')
-      ? source.replace(/(\?>[^\n]*\n)/, `$1${marker}`)
+      ? source.replace(/(\?>[^\n]*\r?\n)/, `$1${marker}`)
       : `${marker}${source}`;
     return { text, message: 'Added the AutoGenerated marker.' };
   }
@@ -705,7 +829,7 @@ export function applyXamlOperation(
     const text = source
       .split(/\r?\n/)
       .filter((line) => !/AutoGenerated by SS14 Studio/i.test(line))
-      .join('\n');
+      .join(eol);
     return { text, message: 'Removed the AutoGenerated marker.' };
   }
   return { text: source, message: 'Unsupported XAML operation.' };

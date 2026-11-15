@@ -10,12 +10,15 @@ import {
   diffText,
   EditFailure,
   findOrphanImages,
+  localizeXamlText,
   parseRsiMeta,
   parseXaml,
   renderGraphTemplate,
+  robustColorToCss,
   serializeRsiMeta,
   type ConstructionGraph,
   type CreateGraphOptions,
+  type CSharpView,
   type DiffPayload,
   type EditResult,
   type GraphOperation,
@@ -29,9 +32,12 @@ import {
   type RsiOperation,
   type RsiView,
   type SpriteInfo,
+  type SpriteLayerInfo,
   type StudioConfig,
   type WebviewMessage,
   type WorkspaceView,
+  type XamlDesignNode,
+  type XamlImageInfo,
   type XamlOperation,
   type XamlView,
 } from '@ss14-studio/core';
@@ -49,15 +55,26 @@ export interface PanelOpenOptions {
   preserveFocus?: boolean;
 }
 
+interface IconSheetResult {
+  width: number;
+  height: number;
+  frameWidth: number;
+  frameHeight: number;
+  columns: number;
+}
+
+interface IconLayerResult extends IconSheetResult {
+  uri: string;
+  color?: string | null;
+  scale?: number | null;
+  offset?: { x: number; y: number } | null;
+  visible?: boolean;
+}
+
 interface IconResult {
   uri: string | null;
-  sheet?: {
-    width: number;
-    height: number;
-    frameWidth: number;
-    frameHeight: number;
-    columns: number;
-  };
+  sheet?: IconSheetResult;
+  layers?: IconLayerResult[];
 }
 
 export class GraphEditorPanel implements vscode.Disposable {
@@ -153,6 +170,14 @@ export class GraphEditorPanel implements vscode.Disposable {
     this.currentDiff = undefined;
     if (!this.ready) return;
     await this.postXaml(path);
+  }
+
+  async openCSharp(path: string, options: PanelOpenOptions = {}): Promise<void> {
+    await this.ensurePanel(options);
+    this.currentView = { kind: 'csharp', path };
+    this.currentDiff = undefined;
+    if (!this.ready) return;
+    await this.postCSharp(path);
   }
 
   async openAbout(options: PanelOpenOptions = {}): Promise<void> {
@@ -414,11 +439,19 @@ export class GraphEditorPanel implements vscode.Disposable {
           this.currentDiff = undefined;
           await this.postXaml(message.path);
           break;
+        case 'openCSharp':
+          this.currentView = { kind: 'csharp', path: message.path };
+          this.currentDiff = undefined;
+          await this.postCSharp(message.path);
+          break;
         case 'pickRsi':
           await this.pickRsi();
           break;
         case 'pickXaml':
           await this.pickXaml();
+          break;
+        case 'pickCSharp':
+          await this.pickCSharp();
           break;
         case 'openAbout':
           await this.openAbout();
@@ -462,6 +495,17 @@ export class GraphEditorPanel implements vscode.Disposable {
         case 'deleteRsiImage': {
           const result = await this.deleteRsiImage(message.path, message.state);
           this.post({ type: 'operationResult', requestId: message.requestId, result });
+          break;
+        }
+        case 'runXamlCleanup': {
+          const result = await this.applyXamlOperation(message.filePath, {
+            kind: 'cleanup',
+          });
+          this.post({
+            type: 'operationResult',
+            requestId: Date.now(),
+            result,
+          });
           break;
         }
         case 'saveConfig': {
@@ -512,6 +556,9 @@ export class GraphEditorPanel implements vscode.Disposable {
         break;
       case 'xaml':
         await this.postXaml(this.currentView.path);
+        break;
+      case 'csharp':
+        await this.postCSharp(this.currentView.path);
         break;
       case 'diff':
         this.post({ type: 'diff', payload: this.currentView.payload });
@@ -616,6 +663,29 @@ export class GraphEditorPanel implements vscode.Disposable {
       return;
     }
     this.post({ type: 'xaml', view });
+    this.setTitle(basename(uri.fsPath));
+  }
+
+  private async postCSharp(path: string): Promise<void> {
+    const uri = await this.fileUri(path);
+    if (!uri) {
+      this.post({ type: 'csharp', view: null, message: `Could not resolve "${path}".` });
+      return;
+    }
+    const view = await this.index.getCSharpView(uri);
+    this.currentView = { kind: 'csharp', path: uri.fsPath };
+    this.currentKey = undefined;
+    this.post({ type: 'view', view: this.currentView });
+    if (!view) {
+      this.post({
+        type: 'csharp',
+        view: null,
+        message: `Could not read ${basename(uri.fsPath)}.`,
+      });
+      this.setTitle();
+      return;
+    }
+    this.post({ type: 'csharp', view });
     this.setTitle(basename(uri.fsPath));
   }
 
@@ -800,9 +870,15 @@ export class GraphEditorPanel implements vscode.Disposable {
     const notes = [...result.notes];
 
     if (result.changed) {
+      const config = readStudioConfig();
       await vscode.workspace.fs.writeFile(
         metaUri,
-        new TextEncoder().encode(serializeRsiMeta(result.meta)),
+        new TextEncoder().encode(
+          serializeRsiMeta(result.meta, {
+            indent: config.rsiMetaIndent,
+            finalNewline: config.rsiMetaFinalNewline,
+          }),
+        ),
       );
 
       if (operation.kind === 'renameState' && operation.name !== operation.state) {
@@ -941,7 +1017,9 @@ export class GraphEditorPanel implements vscode.Disposable {
       return { ok: false, error: 'Could not open the XAML file.' };
     }
     const before = document.getText();
-    const result = applyXamlOperation(before, operation, this.index.relativePath(uri));
+    const result = applyXamlOperation(before, operation, this.index.relativePath(uri), {
+      indentSize: readStudioConfig().xamlIndentSize,
+    });
     if (result.text === before) {
       return { ok: true, message: result.message };
     }
@@ -1152,6 +1230,18 @@ export class GraphEditorPanel implements vscode.Disposable {
     await this.openXaml(picked[0].fsPath);
   }
 
+  private async pickCSharp(): Promise<void> {
+    const picked = await vscode.window.showOpenDialog({
+      title: 'Open a C# file in SS14 Studio',
+      canSelectFiles: true,
+      canSelectMany: false,
+      openLabel: 'Open C#',
+      filters: { 'C# files': ['cs'] },
+    });
+    if (!picked?.[0]) return;
+    await this.openCSharp(picked[0].fsPath);
+  }
+
   private async openDocs(): Promise<void> {
     try {
       await vscode.commands.executeCommand(
@@ -1183,6 +1273,7 @@ export class GraphEditorPanel implements vscode.Disposable {
   }
 
   private onPrototypesChanged(): void {
+    this.iconCache.clear();
     if (!this.panel || !this.ready) return;
     this.postPrototypes();
     if (this.currentView.kind === 'prototype') {
@@ -1226,24 +1317,37 @@ export class GraphEditorPanel implements vscode.Disposable {
   private async postEntityIcon(entityId: string): Promise<void> {
     const cached = this.iconCache.get(entityId);
     if (cached) {
-      this.post({ type: 'entityIcon', entityId, uri: cached.uri, sheet: cached.sheet });
+      this.post({
+        type: 'entityIcon',
+        entityId,
+        uri: cached.uri,
+        sheet: cached.sheet,
+        layers: cached.layers,
+      });
       return;
     }
     const sprite = this.index.getEntitySprite(entityId);
     const result = await this.buildEntityIcon(sprite);
     this.iconCache.set(entityId, result);
-    this.post({ type: 'entityIcon', entityId, uri: result.uri, sheet: result.sheet });
+    this.post({
+      type: 'entityIcon',
+      entityId,
+      uri: result.uri,
+      sheet: result.sheet,
+      layers: result.layers,
+    });
   }
 
-  private async buildEntityIcon(sprite: SpriteInfo | null): Promise<IconResult> {
-    if (!sprite) return { uri: null };
-    if (!sprite.rsi && sprite.texture) {
-      const textureUri = this.index.resolveResourceUri(sprite.texture);
-      if (!textureUri) return { uri: null };
+  private async loadSpriteSheet(
+    layer: Pick<SpriteLayerInfo, 'rsi' | 'state' | 'texture'>,
+  ): Promise<{ uri: string; sheet: IconSheetResult } | null> {
+    if (!layer.rsi && layer.texture) {
+      const textureUri = this.index.resolveResourceUri(layer.texture);
+      if (!textureUri) return null;
       try {
         const bytes = await vscode.workspace.fs.readFile(textureUri);
         const dimensions = pngDimensions(bytes);
-        if (!dimensions) return { uri: null };
+        if (!dimensions) return null;
         return {
           uri: dataUrl(bytes),
           sheet: {
@@ -1255,14 +1359,13 @@ export class GraphEditorPanel implements vscode.Disposable {
           },
         };
       } catch {
-        return { uri: null };
+        return null;
       }
     }
-    if (!sprite.rsi) return { uri: null };
-    const dir = await this.resolveRsiDir(sprite.rsi);
-    if (!dir) return { uri: null };
-    const stateName = sprite.state ?? sprite.layerState;
-    if (!stateName) return { uri: null };
+    if (!layer.rsi) return null;
+    const dir = await this.resolveRsiDir(layer.rsi);
+    if (!dir) return null;
+    const stateName = layer.state ?? 'icon';
     let size = { x: 32, y: 32 };
     try {
       const meta = parseRsiMeta(
@@ -1279,7 +1382,7 @@ export class GraphEditorPanel implements vscode.Disposable {
         vscode.Uri.joinPath(dir, `${stateName}.png`),
       );
       const dimensions = pngDimensions(bytes);
-      if (!dimensions) return { uri: null };
+      if (!dimensions) return null;
       const columns = Math.max(1, Math.floor(dimensions.width / Math.max(1, size.x)));
       return {
         uri: dataUrl(bytes),
@@ -1292,8 +1395,56 @@ export class GraphEditorPanel implements vscode.Disposable {
         },
       };
     } catch {
-      return { uri: null };
+      return null;
     }
+  }
+
+  private async buildEntityIcon(sprite: SpriteInfo | null): Promise<IconResult> {
+    if (!sprite) return { uri: null };
+    const layers: SpriteLayerInfo[] =
+      sprite.layers && sprite.layers.length > 0
+        ? sprite.layers
+        : [
+            {
+              index: 0,
+              rsi: sprite.rsi,
+              state: sprite.state ?? sprite.layerState ?? 'icon',
+              texture: sprite.texture ?? null,
+              color: sprite.color ?? null,
+              scale: sprite.scale ?? null,
+              offset: sprite.offset ?? null,
+              visible: sprite.visible !== false,
+              map: null,
+              fields: {},
+            },
+          ];
+    const resolved: IconLayerResult[] = [];
+    for (const layer of layers) {
+      if (layer.visible === false) continue;
+      const loaded = await this.loadSpriteSheet(layer);
+      if (!loaded) continue;
+      resolved.push({
+        ...loaded.sheet,
+        uri: loaded.uri,
+        color: layer.color,
+        scale: layer.scale,
+        offset: layer.offset,
+        visible: layer.visible,
+      });
+    }
+    if (resolved.length === 0) return { uri: null };
+    const primary = resolved[0]!;
+    return {
+      uri: primary.uri,
+      sheet: {
+        width: primary.width,
+        height: primary.height,
+        frameWidth: primary.frameWidth,
+        frameHeight: primary.frameHeight,
+        columns: primary.columns,
+      },
+      layers: resolved.length > 1 ? resolved : undefined,
+    };
   }
 
   private async readRsi(path: string): Promise<{ dir: vscode.Uri; view: RsiView } | null> {
@@ -1408,12 +1559,112 @@ export class GraphEditorPanel implements vscode.Disposable {
     } catch {
       codeBehindSource = null;
     }
-    return parseXaml(text, {
+    const view = parseXaml(text, {
       filePath: uri.toString(),
       relativePath: this.index.relativePath(uri),
       codeBehindPath,
       codeBehindSource,
     });
+    return this.enrichXamlView(view);
+  }
+
+  /**
+   * Fill in the parts of the simulated designer that need project data:
+   * resolved Fluent strings, texture data URLs and entity sprites.
+   */
+  private async enrichXamlView(view: XamlView): Promise<XamlView> {
+    const walk = async (node: XamlDesignNode): Promise<void> => {
+      const text = localizeXamlText(node.text, (key) =>
+        this.index.resolveLocalization(key),
+      );
+      node.textResolved = text.text;
+      node.textKey = text.key;
+      const tooltip = localizeXamlText(node.tooltip, (key) =>
+        this.index.resolveLocalization(key),
+      );
+      node.tooltipResolved = tooltip.text;
+      node.style.color = robustColorToCss(node.style.color);
+      node.style.background = robustColorToCss(node.style.background);
+      node.style.borderColor = robustColorToCss(node.style.borderColor);
+      node.image = await this.resolveXamlImage(node);
+      await Promise.all(node.children.map(walk));
+    };
+    if (view.design) await walk(view.design);
+    return view;
+  }
+
+  private async resolveXamlImage(
+    node: XamlDesignNode,
+  ): Promise<XamlImageInfo | null> {
+    const attributes = node.attributes ?? {};
+    const fit = xamlImageFit(attributes.StretchMode ?? attributes.Stretch);
+    const texture = (attributes.TexturePath ?? attributes.Texture ?? '').trim();
+    const prototype = (
+      attributes.Prototype ??
+      attributes.Entity ??
+      attributes.EntityPrototype ??
+      ''
+    ).trim();
+    const state = (attributes.State ?? attributes.SpriteState ?? '').trim();
+
+    if (prototype && !texture) {
+      const sprite = this.index.getEntitySprite(prototype);
+      if (!sprite) return null;
+      const icon = await this.buildEntityIcon(sprite);
+      if (!icon.uri || !icon.sheet) return null;
+      return {
+        uri: icon.uri,
+        ...icon.sheet,
+        fit,
+        source: prototype,
+        kind: 'entity',
+      };
+    }
+
+    if (!texture || texture.startsWith('{') || texture.startsWith('$')) {
+      return null;
+    }
+    if (texture.endsWith('.rsi') || state) {
+      const sprite: SpriteInfo = {
+        rsi: texture.replace(/^\/+/, '').replace(/^Resources\//i, ''),
+        state: state || 'icon',
+        layerState: state || 'icon',
+        color: null,
+        scale: null,
+        component: 'Sprite',
+        texture: texture.endsWith('.rsi') ? null : texture,
+      };
+      const icon = await this.buildEntityIcon(sprite);
+      if (!icon.uri || !icon.sheet) return null;
+      return {
+        uri: icon.uri,
+        ...icon.sheet,
+        fit,
+        source: texture,
+        kind: 'sprite',
+      };
+    }
+
+    const textureUri = this.index.resolveResourceUri(texture);
+    if (!textureUri) return null;
+    try {
+      const bytes = await vscode.workspace.fs.readFile(textureUri);
+      const dimensions = pngDimensions(bytes);
+      if (!dimensions) return null;
+      return {
+        uri: dataUrl(bytes),
+        width: dimensions.width,
+        height: dimensions.height,
+        frameWidth: dimensions.width,
+        frameHeight: dimensions.height,
+        columns: 1,
+        fit,
+        source: texture,
+        kind: 'texture',
+      };
+    } catch {
+      return null;
+    }
   }
 
   private async fileUri(path: string): Promise<vscode.Uri | null> {
@@ -1477,6 +1728,9 @@ export function readStudioConfig(): StudioConfig {
     prototypeShowResolved: config.get<boolean>('prototypeShowResolved', true),
     autoSidePreview: config.get<boolean>('autoSidePreview', false),
     defaultGraphEditor: config.get<boolean>('defaultGraphEditor', false),
+    xamlIndentSize: config.get<number>('xamlIndentSize', 4),
+    rsiMetaIndent: config.get<number>('rsiMetaIndent', 2),
+    rsiMetaFinalNewline: config.get<boolean>('rsiMetaFinalNewline', true),
   };
 }
 
@@ -1495,6 +1749,27 @@ async function isDirectory(uri: vscode.Uri): Promise<boolean> {
     return (stat.type & vscode.FileType.Directory) !== 0;
   } catch {
     return false;
+  }
+}
+
+function xamlImageFit(value: string | undefined): XamlImageInfo['fit'] {
+  switch ((value ?? '').toLowerCase()) {
+    case 'scale':
+    case 'stretch':
+      return 'stretch';
+    case 'keepaspectcovered':
+    case 'keepaspectcover':
+    case 'cover':
+      return 'cover';
+    case 'keep':
+    case 'keepcentered':
+    case 'none':
+      return 'none';
+    case 'keepaspectcentered':
+    case 'keepaspect':
+    case 'contain':
+    default:
+      return 'contain';
   }
 }
 

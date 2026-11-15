@@ -1,13 +1,17 @@
 import * as vscode from 'vscode';
 import {
+  buildCSharpView,
   collectTagUsage,
   mayContainConstructionGraph,
+  parseCSharpFile,
   parseFluent,
   parseGraphFile,
   parsePrototypeFile,
   PrototypeRegistry,
   validateGraph,
   type ConstructionGraph,
+  type CSharpIndexFile,
+  type CSharpView,
   type GraphSummary,
   type IndexPayload,
   type ParsedGraphFile,
@@ -19,6 +23,7 @@ import {
   type RawPrototype,
   type SpriteInfo,
   type TagUsage,
+  type XamlClassEntry,
 } from '@ss14-studio/core';
 
 interface Root {
@@ -122,6 +127,10 @@ export class GraphIndex implements vscode.Disposable {
   private partialDeclarations: PartialDeclaration[] = [];
   private registry: PrototypeRegistry | null = null;
   private roots: Root[] = [];
+  private csharpIndex = new Map<string, CSharpIndexFile>();
+  private xamlClasses: XamlClassEntry[] = [];
+  private csharpScan: Promise<void> | undefined;
+  private csharpGeneration = 0;
   private watcher: vscode.FileSystemWatcher | undefined;
   private localeWatcher: vscode.FileSystemWatcher | undefined;
   private disposables: vscode.Disposable[] = [];
@@ -226,6 +235,129 @@ export class GraphIndex implements vscode.Disposable {
   getEntitySprite(entityId: string): SpriteInfo | null {
     this.ensureRegistry();
     return this.registry?.resolve(entityId)?.sprite ?? null;
+  }
+
+  resolveLocalization(key: string): string | undefined {
+    return this.localization.get(key);
+  }
+
+  /**
+   * Scan C# and XAML class declarations lazily. The result is cached until the
+   * next workspace refresh; the first XAML or C# view pays the scan cost.
+   */
+  async ensureCSharpIndex(): Promise<void> {
+    if (this.csharpScan) return this.csharpScan;
+    const generation = this.csharpGeneration;
+    this.csharpScan = (async () => {
+      const roots = this.roots.length > 0
+        ? this.roots
+        : (vscode.workspace.workspaceFolders ?? []).map((folder) => ({
+            uri: folder.uri,
+            name: folder.name,
+            relativeName: folder.name,
+            isSs14: false,
+          }));
+      const exclude =
+        '**/{node_modules,.git,bin,obj,Library,Temp,.vs,.idea,dist,out}/**';
+      const csharp = new Map<string, CSharpIndexFile>();
+      const xamlClasses: XamlClassEntry[] = [];
+      for (const root of roots) {
+        try {
+          const files = await vscode.workspace.findFiles(
+            new vscode.RelativePattern(root.uri, '**/*.cs'),
+            exclude,
+            20000,
+          );
+          await mapLimit(files, 8, async (uri) => {
+            try {
+              const text = decoder.decode(await vscode.workspace.fs.readFile(uri));
+              const relativePath = this.relativePath(uri);
+              const parsed = parseCSharpFile(text, {
+                filePath: uri.toString(),
+                relativePath,
+              });
+              csharp.set(uri.toString(), {
+                filePath: uri.toString(),
+                relativePath,
+                namespace: parsed.namespace,
+                types: parsed.types,
+              });
+            } catch {
+              // Ignore unreadable files.
+            }
+          });
+        } catch (error) {
+          this.output.appendLine(`C# glob failed: ${String(error)}`);
+        }
+        try {
+          const files = await vscode.workspace.findFiles(
+            new vscode.RelativePattern(root.uri, '**/*.xaml'),
+            exclude,
+            20000,
+          );
+          await mapLimit(files, 8, async (uri) => {
+            try {
+              const text = decoder.decode(await vscode.workspace.fs.readFile(uri));
+              const className = /x:Class\s*=\s*"([^"]+)"/.exec(text)?.[1];
+              if (!className) return;
+              xamlClasses.push({
+                filePath: uri.toString(),
+                relativePath: this.relativePath(uri),
+                className,
+              });
+            } catch {
+              // Ignore unreadable files.
+            }
+          });
+        } catch (error) {
+          this.output.appendLine(`XAML glob failed: ${String(error)}`);
+        }
+      }
+      if (generation === this.csharpGeneration) {
+        this.csharpIndex = csharp;
+        this.xamlClasses = xamlClasses;
+      }
+    })().finally(() => {
+      this.csharpScan = undefined;
+    });
+    return this.csharpScan;
+  }
+
+  async getCSharpView(
+    uri: vscode.Uri,
+    text?: string,
+  ): Promise<CSharpView | null> {
+    await this.ensureCSharpIndex();
+    let source = text;
+    if (source == null) {
+      try {
+        source = decoder.decode(await vscode.workspace.fs.readFile(uri));
+      } catch {
+        return null;
+      }
+    }
+    const filePath = uri.toString();
+    const file = parseCSharpFile(source, {
+      filePath,
+      relativePath: this.relativePath(uri),
+    });
+    const exists = (path: string) =>
+      this.csharpIndex.has(path) ||
+      vscode.workspace.textDocuments.some((document) => document.uri.toString() === path);
+    return buildCSharpView(
+      file,
+      [...this.csharpIndex.values()],
+      this.xamlClasses,
+      exists,
+    );
+  }
+
+  getXamlClassEntry(filePath: string): XamlClassEntry | undefined {
+    return this.xamlClasses.find((entry) => entry.filePath === filePath);
+  }
+
+  findXamlClass(className: string): XamlClassEntry | undefined {
+    return this.xamlClasses.find((entry) => entry.className === className);
   }
 
   resolveResourceUri(resourcePath: string): vscode.Uri | undefined {
@@ -337,6 +469,9 @@ export class GraphIndex implements vscode.Disposable {
 
   private async doRefresh(report?: (message: string) => void): Promise<void> {
     const generation = ++this.generation;
+    this.csharpGeneration++;
+    this.csharpIndex.clear();
+    this.xamlClasses = [];
     const started = Date.now();
     this.roots = await this.discoverRoots();
     const folders = vscode.workspace.workspaceFolders ?? [];

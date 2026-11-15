@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import type { RsiStateView, SpriteInfo } from '@ss14-studio/core';
-import type { IconSheet } from '../lib/host';
+import { robustColorToCss } from '@ss14-studio/core';
+import type { IconLayerSheet, IconSheet } from '../lib/host';
 
 export interface SpriteFrameSource {
   uri: string;
@@ -18,6 +19,35 @@ export function sheetFromIcon(icon: IconSheet | undefined): SpriteFrameSource | 
     height: icon.height,
     frameWidth: icon.frameWidth,
     frameHeight: icon.frameHeight,
+  };
+}
+
+export function layersFromIcon(icon: IconSheet | undefined): IconLayerSheet[] {
+  if (!icon) return [];
+  return icon.layers && icon.layers.length > 0 ? icon.layers : [icon];
+}
+
+/** Mask-based tint that keeps the sprite silhouette. */
+export function tintStyle(
+  sheet: SpriteFrameSource,
+  frameIndex: number,
+  size: number,
+  color: string,
+): CSSProperties {
+  const base = frameStyle(sheet, frameIndex, size);
+  return {
+    position: 'absolute',
+    inset: 0,
+    backgroundColor: robustColorToCss(color) ?? color,
+    WebkitMaskImage: `url("${sheet.uri}")`,
+    maskImage: `url("${sheet.uri}")`,
+    WebkitMaskRepeat: 'no-repeat',
+    maskRepeat: 'no-repeat',
+    WebkitMaskSize: base.backgroundSize,
+    maskSize: base.backgroundSize,
+    WebkitMaskPosition: base.backgroundPosition,
+    maskPosition: base.backgroundPosition,
+    pointerEvents: 'none',
   };
 }
 
@@ -80,25 +110,27 @@ export function EntitySprite({
   className?: string;
   animate?: boolean;
 }) {
-  const sheet = entityId ? sheetFromIcon(icons[entityId]) : null;
+  const icon = entityId ? icons[entityId] : undefined;
+  const layers = useMemo(() => layersFromIcon(icon), [icon]);
+  const primary = layers[0];
   const [frame, setFrame] = useState(0);
   const frameCount = useMemo(() => {
-    if (!sheet) return 1;
-    const columns = Math.max(1, Math.floor(sheet.width / sheet.frameWidth));
-    const rows = Math.max(1, Math.floor(sheet.height / sheet.frameHeight));
+    if (!primary) return 1;
+    const columns = Math.max(1, Math.floor(primary.width / Math.max(1, primary.frameWidth)));
+    const rows = Math.max(1, Math.floor(primary.height / Math.max(1, primary.frameHeight)));
     return Math.max(1, Math.min(columns * rows, 8));
-  }, [sheet]);
+  }, [primary]);
 
   useEffect(() => {
     setFrame(0);
-    if (!animate || !sheet || frameCount <= 1) return;
+    if (!animate || !primary || frameCount <= 1) return;
     const timer = window.setInterval(() => {
       setFrame((current) => (current + 1) % frameCount);
     }, 240);
     return () => window.clearInterval(timer);
-  }, [animate, frameCount, sheet]);
+  }, [animate, frameCount, primary]);
 
-  if (!sheet) {
+  if (!primary) {
     return (
       <span className={`sprite-fallback ${className}`.trim()} style={{ width: size, height: size }}>
         <span>{initials(entityId ?? '?')}</span>
@@ -107,8 +139,32 @@ export function EntitySprite({
   }
 
   return (
-    <span className={`entity-sprite ${className}`.trim()}>
-      <SpriteFrame sheet={sheet} frameIndex={frame} size={size} />
+    <span
+      className={`entity-sprite ${layers.length > 1 ? 'layered' : ''} ${className}`.trim()}
+      style={{ width: size, height: size }}
+    >
+      {layers.map((layer, index) => {
+        const scale = layer.scale ?? 1;
+        const offset = layer.offset ?? { x: 0, y: 0 };
+        return (
+          <span
+            key={`${layer.uri}:${index}`}
+            className="entity-sprite-layer"
+            style={{
+              transform: `translate(${offset.x * (size / 32)}px, ${offset.y * (size / 32)}px) scale(${scale})`,
+              opacity: layer.visible === false ? 0 : 1,
+            }}
+          >
+            <SpriteFrame sheet={layer} frameIndex={frame} size={size} />
+            {layer.color ? (
+              <span
+                className="entity-sprite-tint"
+                style={tintStyle(layer, frame, size, layer.color)}
+              />
+            ) : null}
+          </span>
+        );
+      })}
     </span>
   );
 }

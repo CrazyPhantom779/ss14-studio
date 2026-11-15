@@ -11,6 +11,26 @@ SS14 Studio is an AI-generated, human-reviewed alpha project. Read the
 
 ### Added
 
+- **XAML simulated rendering:** resolved Fluent text and tooltips, RobustToolbox
+  colours, RSI/texture/entity images, selected-element attributes and linked C#
+  context in the approximate designer.
+- **YAML sprite editing:** inherited and layered sprite resolution across the
+  whole parent chain, with a layer editor for paths, states, colours, scales,
+  offsets and visibility. Extra Sprite fields survive edits.
+- **Storage editing:** an approximate in-game grid for Storage/StorageFill with
+  item footprints, overflow, drag-to-reorder spawn contents, add/remove items,
+  grid resizing and a generated-YAML preview.
+- **YAML helper diagnostics:** warnings for component names ending in
+  `Component`, PascalCase keys that should be camelCase, and inherited components
+  redeclared without overriding anything.
+- **C# context view:** namespace peers, partial siblings, declarations, linked
+  XAML, code-behind handlers and source navigation in both hosts.
+- **Formatting settings:** XAML indentation (four spaces by default) and RSI
+  `meta.json` indentation/final newline (two spaces plus newline by default) in
+  the Studio settings drawer and host settings.
+- Expanded automated coverage to **181 tests across 23 files** (109 core, 39 UI
+  and 33 Rider sidecar), including storage, C#, sprite layers, inherited sprites,
+  prototype diagnostics, component/storage edits and formatting sanitization.
 - Automated test coverage for graph analysis, validation, YAML helpers,
   prototype parsing and editing, RSI metadata and operations, XAML parsing and
   cleanup, text diffing, graph UI helpers, layout, step fields, selection and the
@@ -24,6 +44,11 @@ SS14 Studio is an AI-generated, human-reviewed alpha project. Read the
 
 ### Fixed
 
+- C# type declarations now report the line of the declaration instead of the
+  preceding `;` or `}` consumed by the parser's anchor.
+- Rider sidecar state writes are serialized per file with unique temporary names,
+  so background layout saves cannot race an explicit save.
+- XAML sprite-sheet images crop frame 0 instead of stretching the whole sheet.
 - YAML scalars that look like reserved words (`true`, `false`, `null`, `yes`,
   `no`, `on`, `off`, `~`) are now quoted before being written as plain strings.
 - Prototype field and component insertion now uses the prototype/component

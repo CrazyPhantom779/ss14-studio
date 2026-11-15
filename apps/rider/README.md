@@ -7,8 +7,8 @@
 
 **An all-in-one Space Station 14 development studio for Rider:** construction
 graphs with entity sprites, YAML prototype inheritance and partials, RobustToolbox
-XAML tooling, RSI animation and pixel editing, and diff/merge review — in a
-dedicated **SS14 Studio** tool window.
+XAML tooling, RSI animation and pixel editing, C# context, and diff/merge review —
+in a dedicated **SS14 Studio** tool window.
 
 The Rider edition shares its React interface and TypeScript engine with the VS
 Code edition. A small Kotlin host starts a local Node sidecar, serves the UI over
@@ -23,7 +23,7 @@ saves and VFS refresh.
 | Kotlin host compiles | Yes, against Rider 2024.2 with JBR 21 |
 | `buildPlugin` produces a ZIP | Yes |
 | Node sidecar end-to-end smoke test | Yes, against the committed fixture and a full Starlight checkout |
-| Sidecar test suite | Yes, 32 tests across config, paths, PNG, state, server and indexer |
+| Sidecar test suite | Yes, 33 tests across config, paths, PNG, state, server and indexer |
 | JCEF tool window on a local Rider install | **Not verified in this environment** |
 
 The plugin is packaged and ready for Rider developers to test, but it has not
@@ -69,7 +69,8 @@ The right-side **SS14 Studio** tool window contains:
 - a **Dashboard** button;
 - a **Refresh** button;
 - a **Settings** button;
-- the shared Studio UI: dashboard, graphs, prototypes, RSI, XAML, diff and About.
+- the shared Studio UI: dashboard, graphs, prototypes, RSI, XAML, C# context,
+  diff and About.
 
 The tool window starts the sidecar when it is opened. The sidecar is also started
 on project open when **Start the sidecar when an SS14 project opens** is enabled
@@ -78,7 +79,7 @@ on project open when **Start the sidecar when an SS14 project opens** is enabled
 ### Editor and project actions
 
 - **Editor context menu → Open in SS14 Studio** opens the current YAML, XAML,
-  `.xaml.cs` or RSI metadata file in the appropriate Studio view.
+  `.xaml.cs`, C# or RSI metadata file in the appropriate Studio view.
 - **Project view context menu → Open in SS14 Studio** does the same from the
   project tree.
 - **Tools → Open SS14 Studio** opens the dashboard.
@@ -111,9 +112,9 @@ Open **Settings | Tools | SS14 Studio**:
 | Refresh the studio when project files change | on | Send VFS changes to the sidecar. |
 | Start the sidecar when an SS14 project opens | on | Start indexing without opening the tool window. |
 
-Graph display, prototype display and other Studio options live in the in-Studio
-settings drawer, shared with the VS Code edition. They are persisted per project
-in the sidecar state directory.
+Graph display, prototype display, XAML/RSI formatting and other Studio options
+live in the in-Studio settings drawer, shared with the VS Code edition. They are
+persisted per project in the sidecar state directory.
 
 ## Build from source
 
@@ -188,8 +189,9 @@ Starlight checkout (427 construction graphs, tens of thousands of prototypes).
 apps/rider/
   src/main/kotlin/...      Kotlin host: tool window, service, actions,
                            settings, status bar, VFS/theme listeners.
-  sidecar/src/             Node sidecar: indexer, studio session, HTTP/SSE
-                           server, state, PNG handling, IDE bridge.
+  sidecar/src/             Node sidecar: indexer (prototypes, C#/XAML),
+                           studio session, HTTP/SSE server, state, PNG
+                           handling, IDE bridge.
   web/rider-bridge.js      JCEF bridge: SSE + POST + UI-state persistence.
   scripts/build-web.mjs    Stages UI assets and generates rider.html.
   scripts/smoke.mjs        End-to-end sidecar test.
@@ -243,7 +245,7 @@ apps/rider/
 ## Differences from the VS Code edition
 
 The Studio views and the core engine are shared, so graph, prototype, RSI, XAML,
-diff and dashboard behavior is the same. Integration differs:
+C# context, diff and dashboard behavior is the same. Integration differs:
 
 | Capability | VS Code | Rider |
 | --- | --- | --- |
@@ -296,6 +298,7 @@ sidecar's in-memory index and only rescan changed files. Use
 - The JCEF tool window is unverified on a local Rider installation.
 - The XAML designer and the prototype in-game card are approximate.
 - Sequence-level `!Index` / `!CombineIndex` partial resolution is approximate.
+- The C# index is a lightweight regex scan, not a compiler or Roslyn workspace.
 - RSI frame add/remove updates metadata only; replace the PNG or use the pixel
   editor when the sheet changes.
 - Diff views are read-only and never auto-merge.
