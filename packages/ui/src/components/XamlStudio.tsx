@@ -1,5 +1,5 @@
-import { useMemo, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from 'react';
-import type { XamlDesignNode, XamlImageInfo } from '@ss14-studio/core';
+import { useEffect, useMemo, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from 'react';
+import type { XamlDesignNode, XamlImageInfo, XamlTheme } from '@ss14-studio/core';
 import {
   Braces,
   Check,
@@ -11,6 +11,7 @@ import {
   Layers,
   LayoutTemplate,
   ListTree,
+  Palette,
   Search,
   Sparkles,
   TriangleAlert,
@@ -20,6 +21,95 @@ import type { StudioHost } from '../lib/host';
 import { Badge, Button, IconButton } from './ui';
 
 type XamlTab = 'designer' | 'outline' | 'completions' | 'source';
+
+const SWATCH_KEYS = [
+  'background',
+  'surface',
+  'element',
+  'accent',
+  'text',
+  'positive',
+  'negative',
+] as const;
+
+function themeColor(
+  theme: XamlTheme,
+  ...keys: string[]
+): string | undefined {
+  for (const key of keys) {
+    const value = theme.colors[key];
+    if (value) return value;
+  }
+  return undefined;
+}
+
+/**
+ * Override the studio CSS variables so the designer chrome adopts the SS14
+ * palette. Explicit XAML colours are inline styles and still win.
+ */
+function themeStyle(theme: XamlTheme | null): CSSProperties {
+  if (!theme) return {};
+  const dark = !theme.light;
+  const bg = themeColor(theme, 'background', 'windowBackground', 'surfaceInspect') ?? (dark ? '#1b1b1f' : '#f4f4f5');
+  const fg = themeColor(theme, 'text', 'whiteText') ?? (dark ? '#fefefe' : '#18181b');
+  const muted = themeColor(theme, 'textMuted') ?? `color-mix(in srgb, ${fg} 62%, transparent)`;
+  const faint = themeColor(theme, 'textDisabled') ?? `color-mix(in srgb, ${fg} 42%, transparent)`;
+  const surface = themeColor(theme, 'windowBackground', 'surface') ?? `color-mix(in srgb, ${bg} 88%, ${fg} 12%)`;
+  const surface2 = themeColor(theme, 'surfaceRaised', 'element', 'surface') ?? `color-mix(in srgb, ${bg} 82%, ${fg} 18%)`;
+  const border = themeColor(theme, 'border', 'secondaryBorder') ?? `color-mix(in srgb, ${fg} 16%, transparent)`;
+  const borderStrong = themeColor(theme, 'secondaryBorder', 'border') ?? `color-mix(in srgb, ${fg} 28%, transparent)`;
+  const accent = themeColor(theme, 'accent', 'nanoGold') ?? (dark ? '#a88b5e' : '#0e7490');
+  const accent2 = themeColor(theme, 'secondaryAccent') ?? accent;
+  const success = themeColor(theme, 'positive') ?? (dark ? '#3e9a5a' : '#2f7d46');
+  const warning = themeColor(theme, 'warning') ?? (dark ? '#fbbf24' : '#b45309');
+  const danger = themeColor(theme, 'danger', 'negative') ?? (dark ? '#c24141' : '#b42f2f');
+  const vars: Record<string, string> = {
+    '--studio-bg': bg,
+    '--studio-fg': fg,
+    '--studio-muted': muted,
+    '--studio-faint': faint,
+    '--studio-surface': surface,
+    '--studio-surface-2': surface2,
+    '--studio-border': border,
+    '--studio-border-strong': borderStrong,
+    '--studio-accent': accent,
+    '--studio-accent-strong': accent,
+    '--studio-accent-2': accent2,
+    '--studio-accent-soft': `color-mix(in srgb, ${accent} 14%, transparent)`,
+    '--studio-accent-line': `color-mix(in srgb, ${accent} 40%, transparent)`,
+    '--studio-success': success,
+    '--studio-warning': warning,
+    '--studio-danger': danger,
+  };
+  for (const key of ['window', 'header', 'button', 'panel'] as const) {
+    const uri = theme.textures?.[key];
+    if (uri) vars[`--xaml-${key}-image`] = `url("${uri}")`;
+  }
+  return vars as unknown as CSSProperties;
+}
+
+function swatchColor(theme: XamlTheme, key: string): string {
+  const value = theme.colors[key];
+  if (value) return value;
+  switch (key) {
+    case 'background':
+      return theme.colors.windowBackground ?? '#1b1b1f';
+    case 'surface':
+      return theme.colors.windowBackground ?? theme.colors.background ?? '#252632';
+    case 'element':
+      return theme.colors.surfaceRaised ?? theme.colors.element ?? '#424665';
+    case 'accent':
+      return theme.colors.nanoGold ?? theme.colors.accent ?? '#a88b5e';
+    case 'text':
+      return theme.colors.whiteText ?? theme.colors.text ?? '#fefefe';
+    case 'positive':
+      return theme.colors.positive ?? '#3e9a5a';
+    case 'negative':
+      return theme.colors.danger ?? theme.colors.negative ?? '#c24141';
+    default:
+      return '#888';
+  }
+}
 
 function thickness(value: string | undefined): string | undefined {
   if (!value) return undefined;
@@ -264,6 +354,19 @@ export function XamlStudio({ host }: { host: StudioHost }) {
   const [tab, setTab] = useState<XamlTab>('designer');
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<XamlDesignNode | null>(null);
+  const [themeId, setThemeId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setSelected(null);
+    setThemeId(null);
+  }, [view?.filePath]);
+
+  const themes = useMemo(() => view?.themes ?? [], [view?.themes]);
+  const activeTheme =
+    themes.find((theme) => theme.id === themeId) ??
+    view?.theme ??
+    themes[0] ??
+    null;
 
   const completions = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -365,13 +468,42 @@ export function XamlStudio({ host }: { host: StudioHost }) {
             <div className="xaml-designer-wrap">
               <div className="xaml-designer-toolbar">
                 <span><LayoutTemplate size={13} aria-hidden /> Approximate RobustToolbox layout · resolved Fluent text · sprites</span>
-                {selected ? (
-                  <code onClick={() => host.openPath(view.filePath, selected.sourceLine ?? outlineLine(view, selected))}>
-                    {selected.className}
-                  </code>
-                ) : null}
+                <div className="xaml-designer-tools">
+                  {themes.length > 0 ? (
+                    <label className="xaml-theme-picker" title="Preview the window with an in-game UI theme">
+                      <Palette size={12} aria-hidden />
+                      <select
+                        value={activeTheme?.id ?? ''}
+                        onChange={(event) => setThemeId(event.target.value)}
+                        aria-label="UI theme"
+                      >
+                        {themes.map((theme) => (
+                          <option key={`${theme.kind}:${theme.id}`} value={theme.id}>
+                            {theme.name} · {theme.kind === 'styleTheme' ? 'style' : 'ui'}
+                          </option>
+                        ))}
+                      </select>
+                      {activeTheme ? (
+                        <span className="xaml-theme-swatches" aria-hidden>
+                          {SWATCH_KEYS.map((key) => (
+                            <i
+                              key={key}
+                              style={{ background: swatchColor(activeTheme, key) }}
+                              title={`${key}: ${swatchColor(activeTheme, key)}`}
+                            />
+                          ))}
+                        </span>
+                      ) : null}
+                    </label>
+                  ) : null}
+                  {selected ? (
+                    <code onClick={() => host.openPath(view.filePath, selected.sourceLine ?? outlineLine(view, selected))}>
+                      {selected.className}
+                    </code>
+                  ) : null}
+                </div>
               </div>
-              <div className="xaml-designer">
+              <div className="xaml-designer" style={themeStyle(activeTheme)}>
                 {view.design ? <DesignerNode node={view.design} onSelect={setSelected} /> : <div className="studio-detail-empty small">No root element.</div>}
               </div>
             </div>

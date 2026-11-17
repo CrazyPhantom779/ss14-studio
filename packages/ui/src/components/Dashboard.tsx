@@ -24,6 +24,7 @@ interface DashboardProps {
   index: IndexPayload | null;
   recent: string[];
   onOpen: (key: string) => void;
+  onAtlas: () => void;
   onCreate: () => void;
   onRefresh: () => void;
 }
@@ -206,7 +207,7 @@ function DashboardSkeleton() {
   );
 }
 
-export function Dashboard({ index, recent, onOpen, onCreate, onRefresh }: DashboardProps) {
+export function Dashboard({ index, recent, onOpen, onAtlas, onCreate, onRefresh }: DashboardProps) {
   const [query, setQuery] = useState('');
   const [folder, setFolder] = useState('all');
   const [sort, setSort] = useState<'name' | 'nodes' | 'issues' | 'folder'>('folder');
@@ -288,6 +289,9 @@ export function Dashboard({ index, recent, onOpen, onCreate, onRefresh }: Dashbo
             <div className="hero-actions">
               <Button variant="primary" icon={Plus} onClick={onCreate}>
                 New construction graph
+              </Button>
+              <Button variant="secondary" icon={Network} onClick={onAtlas}>
+                Open atlas
               </Button>
               <Button variant="secondary" icon={RefreshCw} onClick={onRefresh}>
                 Refresh index

@@ -178,6 +178,32 @@ console.log(
   `prototype: ${prototype.view.summary.id}, ${prototype.view.resolved.components.length} components`,
 );
 
+// Construction prototypes should resolve the sprite of the entity they build.
+await post({ type: 'openPrototype', id: 'ChairWood', kind: 'entity' });
+const chair = await waitFor(
+  (message) =>
+    message.type === 'prototype' && message.view?.summary?.id === 'ChairWood',
+  30_000,
+  'chair prototype',
+);
+if (!chair.view.resolved.sprite?.rsi) {
+  throw new Error('ChairWood sprite did not resolve through inheritance.');
+}
+console.log(`sprite: ${chair.view.resolved.sprite.rsi}`);
+
+// The all-graph atlas clusters every construction graph and keeps links.
+await post({ type: 'openAtlas' });
+const atlas = await waitFor(
+  (message) => message.type === 'atlas' && message.atlas,
+  60_000,
+  'atlas',
+);
+if (!atlas.atlas.nodes?.length) throw new Error('Atlas contains no graph nodes.');
+if (!atlas.atlas.clusters?.length) throw new Error('Atlas contains no clusters.');
+console.log(
+  `atlas: ${atlas.atlas.nodes.length} nodes, ${atlas.atlas.clusters.length} clusters, ${atlas.atlas.edges?.length ?? 0} edges`,
+);
+
 await post({ type: 'openAbout' });
 await waitFor(
   (message) => message.type === 'view' && message.view?.kind === 'about',

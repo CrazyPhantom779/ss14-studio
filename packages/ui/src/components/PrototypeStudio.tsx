@@ -7,6 +7,7 @@ import type {
   PrototypeView,
   ResolvedField,
   SpriteInfo,
+  StorageContainerView,
   StorageItemView,
   StorageView,
 } from '@ss14-studio/core';
@@ -106,10 +107,12 @@ export function PrototypeStudio({ host }: { host: StudioHost }) {
   const payload = host.prototypes;
   const currentKind = view?.summary.kind;
   const entityId = view && view.summary.kind === 'entity' ? view.summary.id : undefined;
+  const displayEntity = view?.displayEntity ?? entityId;
+  const headerSprite = view?.resolved.sprite ?? view?.displaySprite ?? null;
 
   useEffect(() => {
-    if (entityId) host.requestIcon(entityId);
-  }, [entityId, host.requestIcon]);
+    if (displayEntity) host.requestIcon(displayEntity);
+  }, [displayEntity, host.requestIcon]);
 
   useEffect(() => {
     setQuery('');
@@ -132,6 +135,15 @@ export function PrototypeStudio({ host }: { host: StudioHost }) {
         .includes(needle);
     });
   }, [kind, payload?.summaries, query]);
+
+  useEffect(() => {
+    for (const summary of filtered.slice(0, limit)) {
+      const entity =
+        summary.displayEntity ??
+        (summary.kind === 'entity' ? summary.id : null);
+      if (entity) host.requestIcon(entity);
+    }
+  }, [filtered, host.requestIcon, limit]);
 
   const open = (summary: PrototypeSummary) => {
     host.openPrototype(summary.id, summary.kind);
@@ -191,13 +203,25 @@ export function PrototypeStudio({ host }: { host: StudioHost }) {
                   onClick={() => open(summary)}
                   title={`${summary.relativePath}:${summary.line}`}
                 >
-                  <EntitySprite entityId={summary.kind === 'entity' ? summary.id : null} icons={host.icons} size={26} />
+                  <EntitySprite
+                    entityId={
+                      summary.displayEntity ??
+                      (summary.kind === 'entity' ? summary.id : null)
+                    }
+                    icons={host.icons}
+                    size={26}
+                  />
                   <span className="prototype-row-main">
                     <span className="prototype-row-name">{summary.name || summary.id}</span>
                     <span className="prototype-row-id">
                       {summary.id}
                       {summary.abstract ? <em>abstract</em> : null}
                       {summary.partial ? <em className="partial">partial</em> : null}
+                      {summary.displayEntity && summary.displayEntity !== summary.id ? (
+                        <em className="display-entity" title={`Shows ${summary.displayEntity}`}>
+                          → {summary.displayEntity}
+                        </em>
+                      ) : null}
                     </span>
                   </span>
                   <span className="prototype-row-meta">
@@ -243,13 +267,18 @@ export function PrototypeStudio({ host }: { host: StudioHost }) {
             <header className="prototype-head">
               <div className="prototype-head-main">
                 <div className="prototype-sprite">
-                  <EntitySprite entityId={entityId} icons={host.icons} size={56} />
+                  <EntitySprite entityId={displayEntity} icons={host.icons} size={56} />
                 </div>
                 <div>
                   <div className="prototype-eyebrow">
                     <Badge tone="accent">{view.summary.kind}</Badge>
                     {view.summary.abstract ? <Badge tone="muted">abstract</Badge> : null}
                     {view.summary.partial ? <Badge tone="warning">partial</Badge> : null}
+                    {view.displayKind ? (
+                      <Badge tone="muted" title={`Sprite resolved from ${view.displayEntity}`}>
+                        shows {view.displayKind}
+                      </Badge>
+                    ) : null}
                     <button
                       type="button"
                       className="inline-path"
@@ -262,12 +291,23 @@ export function PrototypeStudio({ host }: { host: StudioHost }) {
                   </div>
                   <h1>{view.summary.name || view.summary.id}</h1>
                   <code>{view.summary.id}</code>
+                  {view.displayEntity && view.displayEntity !== view.summary.id ? (
+                    <button
+                      type="button"
+                      className="inline-path display-entity-link"
+                      onClick={() => host.openPrototype(view.displayEntity!)}
+                      title="Open the entity whose sprite is previewed"
+                    >
+                      <Boxes size={12} aria-hidden />
+                      shows {view.displayEntity}
+                    </button>
+                  ) : null}
                   {view.summary.description ? <p>{view.summary.description}</p> : null}
                 </div>
               </div>
               <div className="prototype-head-actions">
-                {view.resolved.sprite?.rsi ? (
-                  <Button icon={ImageIcon} size="sm" onClick={() => host.openRsi(view.resolved.sprite!.rsi!)}>
+                {headerSprite?.rsi ? (
+                  <Button icon={ImageIcon} size="sm" onClick={() => host.openRsi(headerSprite.rsi!)}>
                     Sprite
                   </Button>
                 ) : null}
@@ -309,7 +349,11 @@ export function PrototypeStudio({ host }: { host: StudioHost }) {
               {view.storage ? (
                 <button type="button" className={tab === 'storage' ? 'active' : ''} onClick={() => setTab('storage')}>
                   <LayoutGrid size={13} aria-hidden /> Storage
-                  <span>{view.storage.items.length}</span>
+                  <span>
+                    {view.storage.containers.length > 1
+                      ? `${view.storage.containers.length} containers`
+                      : view.storage.items.length}
+                  </span>
                 </button>
               ) : null}
               <button type="button" className={tab === 'inheritance' ? 'active' : ''} onClick={() => setTab('inheritance')}>
@@ -337,7 +381,7 @@ export function PrototypeStudio({ host }: { host: StudioHost }) {
 
               {tab === 'overview' ? (
                 <div className="prototype-overview-grid">
-                  <InGameCard view={view} host={host} entityId={entityId} />
+                  <InGameCard view={view} host={host} entityId={displayEntity} />
                   <section className="studio-card">
                     <header className="studio-card-head">
                       <h3>Resolved fields</h3>
@@ -727,17 +771,52 @@ function StorageEditor({
   storage: StorageView;
   host: StudioHost;
 }) {
+  const containers = useMemo<StorageContainerView[]>(() => {
+    if (storage.containers.length > 0) return storage.containers;
+    return [
+      {
+        id: 'storagebase',
+        label: 'Storage',
+        component: storage.component ?? 'StorageFill',
+        grid: storage.grid,
+        columns: storage.columns,
+        rows: storage.rows,
+        items: storage.items,
+        maxItemSize: storage.maxItemSize,
+        capacity: storage.capacity,
+        editable: storage.hasFill,
+        diagnostics: storage.diagnostics,
+      },
+    ];
+  }, [storage]);
+
+  const [activeId, setActiveId] = useState(containers[0]?.id ?? 'storagebase');
+  useEffect(() => {
+    setActiveId((current) =>
+      containers.some((container) => container.id === current)
+        ? current
+        : containers[0]?.id ?? 'storagebase',
+    );
+  }, [containers, view.key]);
+  const active =
+    containers.find((container) => container.id === activeId) ?? containers[0]!;
+
   const [adding, setAdding] = useState('');
   const [dragIndex, setDragIndex] = useState<number | null>(null);
-  const placements = useMemo(() => placeStorageItems(storage), [storage]);
+  const placements = useMemo(() => placeStorageItems(active), [active]);
   const placed = placements.filter((placement) => !placement.overflow);
   const overflow = placements.filter((placement) => placement.overflow);
-  const columns = Math.max(1, storage.columns);
-  const rows = Math.max(1, storage.rows);
+  const columns = Math.max(1, active.columns);
+  const rows = Math.max(1, active.rows);
+  const editable = active.editable && !host.readOnly;
+  const canResize =
+    active.id === 'storagebase' && storage.hasStorage && !host.readOnly;
 
   useEffect(() => {
-    for (const item of storage.items) host.requestIcon(item.id);
-  }, [host.requestIcon, storage.items]);
+    for (const container of containers) {
+      for (const item of container.items) host.requestIcon(item.id);
+    }
+  }, [containers, host.requestIcon]);
 
   const applyContents = (items: readonly StorageItemView[]) =>
     host.applyPrototypeOperation(view.resolved.filePath, {
@@ -748,17 +827,17 @@ function StorageEditor({
 
   const move = (from: number, to: number) => {
     if (from === to) return;
-    void applyContents(reorder(storage.items, from, to));
+    void applyContents(reorder(active.items, from, to));
   };
 
   const addItem = () => {
     const id = adding.trim();
     if (!id) return;
     void applyContents([
-      ...storage.items,
+      ...active.items,
       {
         id,
-        index: storage.items.length,
+        index: active.items.length,
         name: id,
         kind: null,
         sprite: null,
@@ -783,37 +862,91 @@ function StorageEditor({
         <header className="studio-card-head">
           <h3>
             <LayoutGrid size={14} aria-hidden />
-            Storage grid
+            Containers
           </h3>
           <Badge tone="muted">
-            {storage.items.length}/{storage.capacity} slots
+            {containers.length} container{containers.length === 1 ? '' : 's'}
           </Badge>
           <div className="card-head-actions">
-            <Button size="sm" icon={Plus} disabled={host.readOnly} onClick={() => resize(columns + 1, rows)}>
-              Add column
-            </Button>
-            <Button size="sm" icon={Plus} disabled={host.readOnly} onClick={() => resize(columns, rows + 1)}>
-              Add row
-            </Button>
-            <Button
-              size="sm"
-              icon={RotateCcw}
-              disabled={host.readOnly || (columns === 8 && rows === 4)}
-              onClick={() => resize(8, 4)}
-            >
-              Reset 8×4
-            </Button>
+            {canResize ? (
+              <>
+                <Button size="sm" icon={Plus} onClick={() => resize(columns + 1, rows)}>
+                  Add column
+                </Button>
+                <Button size="sm" icon={Plus} onClick={() => resize(columns, rows + 1)}>
+                  Add row
+                </Button>
+                <Button
+                  size="sm"
+                  icon={RotateCcw}
+                  disabled={columns === 8 && rows === 4}
+                  onClick={() => resize(8, 4)}
+                >
+                  Reset 8×4
+                </Button>
+              </>
+            ) : null}
           </div>
         </header>
 
+        {containers.length > 1 ? (
+          <div className="storage-container-tabs" role="tablist" aria-label="Storage containers">
+            {containers.map((container) => (
+              <button
+                key={container.id}
+                type="button"
+                role="tab"
+                aria-selected={container.id === active.id}
+                className={container.id === active.id ? 'active' : ''}
+                onClick={() => {
+                  setActiveId(container.id);
+                  setDragIndex(null);
+                }}
+                title={`${container.component} · ${container.id}`}
+              >
+                <span>{container.label}</span>
+                <em>{container.items.length}</em>
+                {container.editable ? (
+                  <Badge tone="success">edit</Badge>
+                ) : (
+                  <Badge tone="muted">preview</Badge>
+                )}
+              </button>
+            ))}
+          </div>
+        ) : null}
+
         <div className="storage-meta">
+          <span>
+            <Badge tone="accent">{active.component}</Badge> {active.id}
+          </span>
           <span>{columns} × {rows} grid</span>
-          <span>max item size: {storage.maxItemSize ?? 'default'}</span>
-          <span>{storage.hasStorage ? 'Storage component' : 'StorageFill only'}</span>
+          <span>{active.items.length}/{active.capacity} slots</span>
+          <span>max item size: {active.maxItemSize ?? 'default'}</span>
+          {editable ? (
+            <span className="storage-editable">editable</span>
+          ) : (
+            <span className="storage-preview-only">preview only</span>
+          )}
         </div>
 
+        {active.diagnostics.length > 0 ? (
+          <div className="storage-diagnostics">
+            {active.diagnostics.map((diagnostic, index) => (
+              <span key={`${diagnostic.code}:${index}`} className={diagnostic.severity}>
+                {diagnostic.severity === 'warning' ? (
+                  <TriangleAlert size={11} aria-hidden />
+                ) : (
+                  <Info size={11} aria-hidden />
+                )}
+                {diagnostic.message}
+              </span>
+            ))}
+          </div>
+        ) : null}
+
         <div
-          className="storage-grid"
+          className={`storage-grid ${editable ? 'is-editable' : 'is-preview'}`}
           style={{
             gridTemplateColumns: `repeat(${columns}, 42px)`,
             gridTemplateRows: `repeat(${rows}, 42px)`,
@@ -821,7 +954,7 @@ function StorageEditor({
           onDragOver={(event) => event.preventDefault()}
           onDrop={(event) => {
             event.preventDefault();
-            if (dragIndex != null) move(dragIndex, storage.items.length - 1);
+            if (editable && dragIndex != null) move(dragIndex, active.items.length - 1);
             setDragIndex(null);
           }}
         >
@@ -839,27 +972,31 @@ function StorageEditor({
             <button
               type="button"
               key={`${placement.item.index}:${placement.item.id}`}
-              className={`storage-item ${dragIndex === placement.item.index ? 'dragging' : ''}`}
+              className={`storage-item ${dragIndex === placement.item.index ? 'dragging' : ''} ${placement.item.alternative ? 'alternative' : ''}`}
               style={{
                 gridColumn: `${placement.x + 1} / span ${placement.width}`,
                 gridRow: `${placement.y + 1} / span ${placement.height}`,
               }}
-              draggable={!host.readOnly}
-              onDragStart={() => setDragIndex(placement.item.index)}
+              draggable={editable}
+              onDragStart={() => editable && setDragIndex(placement.item.index)}
               onDragEnd={() => setDragIndex(null)}
               onDragOver={(event) => event.preventDefault()}
               onDrop={(event) => {
                 event.preventDefault();
                 event.stopPropagation();
-                if (dragIndex != null) move(dragIndex, placement.item.index);
+                if (editable && dragIndex != null) move(dragIndex, placement.item.index);
                 setDragIndex(null);
               }}
-              title={`${placement.item.id}${placement.item.amount && placement.item.amount !== 1 ? ` ×${placement.item.amount}` : ''} — drag to reorder`}
+              title={storageItemTitle(placement.item)}
             >
               <EntitySprite entityId={placement.item.id} icons={host.icons} size={30} />
               <span>{placement.item.name}</span>
               {placement.item.amount && placement.item.amount !== 1 ? <em>×{placement.item.amount}</em> : null}
-              {!host.readOnly ? (
+              {placement.item.rotation != null && placement.item.rotation % 360 !== 0 ? (
+                <em className="rotation">{placement.item.rotation}°</em>
+              ) : null}
+              {placement.item.slotName ? <em className="slot-name">{placement.item.slotName}</em> : null}
+              {editable ? (
                 <span
                   className="storage-remove"
                   role="button"
@@ -867,12 +1004,12 @@ function StorageEditor({
                   title="Remove from StorageFill"
                   onClick={(event) => {
                     event.stopPropagation();
-                    void applyContents(storage.items.filter((item) => item.index !== placement.item.index));
+                    void applyContents(active.items.filter((item) => item.index !== placement.item.index));
                   }}
                   onKeyDown={(event) => {
                     if (event.key === 'Enter' || event.key === ' ') {
                       event.stopPropagation();
-                      void applyContents(storage.items.filter((item) => item.index !== placement.item.index));
+                      void applyContents(active.items.filter((item) => item.index !== placement.item.index));
                     }
                   }}
                 >
@@ -883,25 +1020,36 @@ function StorageEditor({
           ))}
         </div>
 
-        <form
-          className="storage-add"
-          onSubmit={(event) => {
-            event.preventDefault();
-            addItem();
-          }}
-        >
-          <Field label="Spawn an entity inside">
-            <input
-              value={adding}
-              placeholder="e.g. ToolboxEmergency, ClothingBackpack"
-              spellCheck={false}
-              onChange={(event) => setAdding(event.target.value)}
-            />
-          </Field>
-          <Button icon={Plus} type="submit" disabled={host.readOnly || !adding.trim()}>
-            Add item
-          </Button>
-        </form>
+        {editable ? (
+          <form
+            className="storage-add"
+            onSubmit={(event) => {
+              event.preventDefault();
+              addItem();
+            }}
+          >
+            <Field label="Spawn an entity inside">
+              <input
+                value={adding}
+                placeholder="e.g. ToolboxEmergency, ClothingBackpack"
+                spellCheck={false}
+                onChange={(event) => setAdding(event.target.value)}
+              />
+            </Field>
+            <Button icon={Plus} type="submit" disabled={!adding.trim()}>
+              Add item
+            </Button>
+          </form>
+        ) : (
+          <div className="storage-readonly-note">
+            <Info size={13} aria-hidden />
+            <span>
+              {active.component === 'StorageFill'
+                ? 'This StorageFill has no editable Storage grid. Add a Storage component to edit its contents.'
+                : `${active.component} containers are preview-only in SS14 Studio. Edit the YAML source to change them.`}
+            </span>
+          </div>
+        )}
 
         {overflow.length > 0 ? (
           <div className="storage-overflow">
@@ -910,18 +1058,23 @@ function StorageEditor({
               <button
                 type="button"
                 key={`overflow:${placement.item.index}`}
-                draggable={!host.readOnly}
-                onDragStart={() => setDragIndex(placement.item.index)}
+                draggable={editable}
+                onDragStart={() => editable && setDragIndex(placement.item.index)}
                 onDragOver={(event) => event.preventDefault()}
                 onDrop={() => {
-                  if (dragIndex != null) move(dragIndex, placement.item.index);
+                  if (editable && dragIndex != null) move(dragIndex, placement.item.index);
                   setDragIndex(null);
                 }}
-                onClick={() => void applyContents(storage.items.filter((item) => item.index !== placement.item.index))}
+                onClick={() =>
+                  editable &&
+                  void applyContents(active.items.filter((item) => item.index !== placement.item.index))
+                }
+                title={storageItemTitle(placement.item)}
               >
                 <EntitySprite entityId={placement.item.id} icons={host.icons} size={22} />
                 <span>{placement.item.name}</span>
-                <em>remove</em>
+                <em>{placement.item.footprint.width}×{placement.item.footprint.height}</em>
+                {editable ? <em>remove</em> : null}
               </button>
             ))}
           </div>
@@ -932,39 +1085,57 @@ function StorageEditor({
         <header className="studio-card-head">
           <h3>
             <Sparkles size={14} aria-hidden />
-            Approximate in-game storage
+            Spawn summary
           </h3>
-          <Badge tone="muted">preview</Badge>
+          <Badge tone="muted">
+            {containers.reduce((sum, container) => sum + container.items.length, 0)} entries
+          </Badge>
         </header>
-        <div className="storage-preview">
-          <div className="storage-preview-head">
-            <strong>{view.resolved.name || view.summary.id}</strong>
-            <span>{storage.items.length} items · {storage.capacity} slots</span>
-          </div>
-          <div className="storage-preview-grid" style={{ gridTemplateColumns: `repeat(${columns}, 1fr)` }}>
-            {placed.map((placement) => (
-              <span
-                key={`preview:${placement.item.index}`}
-                className="storage-preview-item"
-                style={{
-                  gridColumn: `${placement.x + 1} / span ${placement.width}`,
-                  gridRow: `${placement.y + 1} / span ${placement.height}`,
-                }}
-                title={placement.item.id}
-              >
-                <EntitySprite entityId={placement.item.id} icons={host.icons} size={24} />
-              </span>
-            ))}
-          </div>
-          <p>
-            Drag items in the grid to change their order in <code>StorageFill.contents</code>.
-            The engine places entries in that order; exact rotations and multi-cell
-            packing are approximated.
-          </p>
+        <div className="storage-summary">
+          {containers.map((container) => (
+            <div className="storage-summary-group" key={container.id}>
+              <div className="storage-summary-head">
+                <strong>{container.label}</strong>
+                <code>{container.component}</code>
+                <Badge tone="muted">{container.items.length}</Badge>
+              </div>
+              {container.items.map((item) => (
+                <div
+                  className="storage-summary-row"
+                  key={`${container.id}:${item.index}:${item.id}`}
+                >
+                  <EntitySprite entityId={item.id} icons={host.icons} size={22} />
+                  <span>{item.name}</span>
+                  <code>{item.id}</code>
+                  {item.amount && item.amount !== 1 ? <em>×{item.amount}</em> : null}
+                  <em>{item.footprint.width}×{item.footprint.height}</em>
+                  {item.rotation != null && item.rotation % 360 !== 0 ? (
+                    <em>{item.rotation}°</em>
+                  ) : null}
+                  {item.slotName ? <em className="slot-name">{item.slotName}</em> : null}
+                  {item.alternative ? <em className="alternative">or</em> : null}
+                </div>
+              ))}
+              {container.items.length === 0 ? <span className="muted">No entries.</span> : null}
+            </div>
+          ))}
         </div>
+        <p className="storage-summary-note">
+          Positions are approximate: entries are packed first-fit into unit cells using their
+          item footprint and stored rotation. Group selectors list every alternative.
+        </p>
       </section>
     </div>
   );
+}
+
+function storageItemTitle(item: StorageItemView): string {
+  const parts = [item.id];
+  if (item.amount && item.amount !== 1) parts.push(`×${item.amount}`);
+  if (item.slotName) parts.push(item.slotName);
+  if (item.rotation != null && item.rotation % 360 !== 0) parts.push(`${item.rotation}°`);
+  parts.push(`${item.footprint.width}×${item.footprint.height}`);
+  return parts.join(' · ');
 }
 
 
@@ -1154,7 +1325,7 @@ function InheritanceTree({
 }
 
 function InGameCard({ view, host, entityId }: { view: PrototypeView; host: StudioHost; entityId?: string }) {
-  const sprite = view.resolved.sprite;
+  const sprite = view.resolved.sprite ?? view.displaySprite ?? null;
   return (
     <section className="studio-card in-game-card">
       <header className="studio-card-head">

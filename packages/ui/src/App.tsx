@@ -8,6 +8,7 @@ import { TopBar } from './components/TopBar';
 import { Sidebar } from './components/Sidebar';
 import { Dashboard } from './components/Dashboard';
 import { GraphWorkspace } from './components/GraphWorkspace';
+import { GraphAtlasView } from './components/GraphAtlas';
 import { Inspector } from './components/Inspector';
 import { Modals, ConfirmDialog } from './components/Modals';
 import { Toasts } from './components/Toasts';
@@ -75,7 +76,9 @@ export default function App() {
         ? host.graph?.id
         : view.kind === 'prototype'
           ? view.id
-          : view.kind === 'rsi' || view.kind === 'xaml' || view.kind === 'csharp'
+          : view.kind === 'atlas'
+            ? 'Construction atlas'
+            : view.kind === 'rsi' || view.kind === 'xaml' || view.kind === 'csharp'
             ? view.path.replaceAll('\\', '/').split('/').pop()
             : view.kind === 'about'
               ? 'About'
@@ -153,14 +156,17 @@ export default function App() {
       case 'about':
         host.openAbout();
         break;
+      case 'atlas':
+        host.openAtlas();
+        break;
       default:
         host.openDashboard();
         break;
     }
-  }, [host.openAbout, host.openCSharp, host.openDashboard, host.openGraph, host.openPrototype, host.openRsi, host.openXaml]);
+  }, [host.openAbout, host.openAtlas, host.openCSharp, host.openDashboard, host.openGraph, host.openPrototype, host.openRsi, host.openXaml]);
 
   const mainClass =
-    view.kind === 'graph'
+    view.kind === 'graph' || view.kind === 'atlas'
       ? 'graph-mode'
       : view.kind === 'dashboard'
         ? 'dashboard-mode'
@@ -207,8 +213,17 @@ export default function App() {
               index={host.index}
               recent={host.recent}
               onOpen={openGraph}
+              onAtlas={host.openAtlas}
               onCreate={() => setDialog({ kind: 'createGraph' })}
               onRefresh={host.refreshIndex}
+            />
+          ) : null}
+
+          {view.kind === 'atlas' ? (
+            <GraphAtlasView
+              atlas={host.atlas}
+              onOpenGraph={openGraph}
+              onBack={openDashboard}
             />
           ) : null}
 

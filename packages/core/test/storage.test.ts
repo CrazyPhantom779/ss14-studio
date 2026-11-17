@@ -49,7 +49,7 @@ describe('storage extraction', () => {
     const storage = extractStorage(
       [
         component('Storage', {
-          grid: ['0,0,1,1', { x: 1, y: 0, width: 1, height: 1 }, [0, 1, 1, 1]],
+          grid: ['0,0,1,1', { x: 1, y: 0, width: 1, height: 1 }, [0, 1, 2, 2]],
           maxItemSize: 'Normal',
         }),
         component('StorageFill', {
@@ -67,11 +67,11 @@ describe('storage extraction', () => {
     expect(storage.grid.map((cell) => [cell.x, cell.y, cell.width, cell.height])).toEqual([
       [0, 0, 1, 1],
       [1, 0, 1, 1],
-      [0, 1, 1, 1],
+      [0, 1, 2, 2],
     ]);
     expect(storage.columns).toBe(2);
-    expect(storage.rows).toBe(2);
-    expect(storage.capacity).toBe(3);
+    expect(storage.rows).toBe(3);
+    expect(storage.capacity).toBe(6);
     expect(storage.maxItemSize).toBe('Normal');
     expect(storage.items).toHaveLength(2);
     expect(storage.items[0]).toMatchObject({
@@ -90,7 +90,8 @@ describe('storage extraction', () => {
       orGroup: 'bags',
       extra: { extra: 'kept' },
     });
-    expect(storage.items[1]?.slot).toBeNull();
+    expect(storage.items[1]?.slot).toBe(2);
+    expect(storage.items[1]?.footprint).toEqual({ width: 2, height: 2 });
     expect(storage.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain(
       'prototype.storage.overflow',
     );

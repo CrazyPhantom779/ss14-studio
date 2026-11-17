@@ -161,3 +161,70 @@ jobs:
             release-artifacts/*.zip
           generate_release_notes: true
           fail_on_unmatched_files: true
+
+  publish-vscode:
+    name: Publish VS Code / Open VSX
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [package-vscode]
+    runs-on: ubuntu-latest
+    env:
+      VSCE_PAT: ${{ secrets.VSCE_PAT }}
+      OPEN_VSX_TOKEN: ${{ secrets.OPEN_VSX_TOKEN }}
+    steps:
+      - name: Download VSIX
+        uses: actions/download-artifact@v4
+        with:
+          name: ss14-studio-vsix
+          path: release-artifacts
+
+      - name: Publish to VS Code Marketplace
+        if: env.VSCE_PAT != ''
+        run: npx --yes @vscode/vsce@latest publish --packagePath release-artifacts/*.vsix --pat "$VSCE_PAT"
+
+      - name: Publish to Open VSX
+        if: env.OPEN_VSX_TOKEN != ''
+        run: npx --yes ovsx@latest publish --packagePath release-artifacts/*.vsix --pat "$OPEN_VSX_TOKEN"
+
+  publish-rider:
+    name: Publish JetBrains Marketplace
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [rider-plugin]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      PUBLISH_TOKEN: ${{ secrets.JETBRAINS_MARKETPLACE_TOKEN }}
+      CERTIFICATE_CHAIN: ${{ secrets.JETBRAINS_CERTIFICATE_CHAIN }}
+      PRIVATE_KEY: ${{ secrets.JETBRAINS_PRIVATE_KEY }}
+      PRIVATE_KEY_PASSWORD: ${{ secrets.JETBRAINS_PRIVATE_KEY_PASSWORD }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Setup JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Rider web and sidecar assets
+        run: npm run build:rider
+
+      - name: Sign and publish plugin
+        if: env.PUBLISH_TOKEN != ''
+        working-directory: apps/rider
+        run: |
+          chmod +x gradlew
+          ./gradlew signPlugin publishPlugin --no-daemon
+

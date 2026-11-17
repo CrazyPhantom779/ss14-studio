@@ -25,10 +25,14 @@ opens automatically unless you enable it.
 
 - Browse every construction graph from the **SS14 Studio** activity-bar view or
   the dashboard graph atlas.
+- **Open atlas** draws the whole repository as one clustered map with folder
+  clusters, construction links, search dimming, pan/zoom and click-through.
 - A blueprint canvas with nodes, directed step edges, conditions, materials,
   transforms, actions and completion steps.
 - Real entity sprites on nodes, including animated icons cropped from RSI state
-  sheets.
+  sheets, computer/machine/desktop board variants and variant badges.
+- Overlap-safe auto-layout; user-arranged positions are preserved and new nodes
+  are placed into free space.
 - Search, filter and sort by folder, size or diagnostics.
 - Follow incoming and outgoing paths and highlight a complete construction route.
 - A focused inspector for nodes, edges, steps and completion actions.
@@ -58,9 +62,15 @@ opens automatically unless you enable it.
   key components.
 - Sprites resolved through the inheritance chain, including compact, texture and
   nested `layers:` forms with per-layer colour, scale, offset and visibility.
+- Display sprites for construction recipes, board products, uplink listings,
+  entity tables and `OptionsVisualizer` layers; entity sprites win when ids
+  collide.
 - Create and edit Sprite components with multiple layers.
 - Visual Storage and StorageFill editing: drag items to change spawn order, add
   or remove entities, resize the grid and preview the YAML before writing.
+- Read-only previews for `ContainerFill`, `EntityTableContainerFill`,
+  `startingGear`, `entityTable` and `ItemSlots`, with multi-container tabs,
+  footprint/rotation-aware placement and a spawn summary.
 - Helper diagnostics for `Component` suffixes, PascalCase keys and redundant
   inherited components.
 - Add and edit prototype fields and components.
@@ -76,6 +86,9 @@ opens automatically unless you enable it.
 - Approximate visual designer for containers, layout, text, styles and common
   control properties, with resolved Fluent text, RobustToolbox colours and RSI,
   texture and entity sprites.
+- In-game UI theme picker with palette swatches and nine-slice window, header,
+  button and panel textures extracted from `styleTheme` and `uiTheme`
+  prototypes. Explicit XAML colours still win.
 - Linked C# code-behind context: namespace, types, handlers, fields and source
   navigation.
 - **Format XAML** and **Clean Up XAML** with a before/after diff before writing.

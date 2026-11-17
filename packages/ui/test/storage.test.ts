@@ -40,6 +40,7 @@ function storage(overrides: Partial<StorageView> = {}): StorageView {
     items: [],
     maxItemSize: 'Normal',
     capacity: 3,
+    containers: [],
     diagnostics: [],
     ...overrides,
   };
@@ -132,6 +133,25 @@ describe('storage placement', () => {
       ['Gone', true],
     ]);
     expect(placed[0]).toMatchObject({ x: 0, y: 0, width: 1, height: 1 });
+  });
+
+  it('honours explicit spawn coordinates and item rotation', () => {
+    const view = storage({
+      items: [
+        item('Positioned', { x: 1, y: 2 }),
+        item('Rotated', {
+          x: 0,
+          y: 1,
+          footprint: { width: 2, height: 1 },
+          rotation: 90,
+        }),
+        item('Outside', { x: 9, y: 9 }),
+      ],
+    });
+    const placed = placeStorageItems(view);
+    expect(placed[0]).toMatchObject({ x: 1, y: 2, width: 1, height: 1, overflow: false });
+    expect(placed[1]).toMatchObject({ x: 0, y: 1, width: 1, height: 2, overflow: false });
+    expect(placed[2]?.overflow).toBe(true);
   });
 
   it('returns no placements for an empty StorageFill', () => {

@@ -20,6 +20,12 @@ export type StudioEdgeData = {
   highlighted: boolean;
   edgeStyle: StudioConfig['graphEdgeStyle'];
   showSummary: boolean;
+  /** Position among edges with the same source and target. */
+  parallelIndex?: number;
+  /** Total edges with the same source and target. */
+  parallelCount?: number;
+  /** Pixel offset applied to the floating label. */
+  labelOffset?: { x: number; y: number } | null;
   onSelect: () => void;
 };
 
@@ -37,6 +43,9 @@ export function StepEdge({
   selected,
   markerEnd,
 }: EdgeProps<StudioGraphEdge>) {
+  const parallelCount = data?.parallelCount ?? 1;
+  const parallelIndex = data?.parallelIndex ?? 0;
+  const spread = parallelCount > 1 ? parallelIndex : 0;
   const [path, labelX, labelY] =
     data?.edgeStyle === 'straight'
       ? getStraightPath({ sourceX, sourceY, targetX, targetY })
@@ -48,7 +57,7 @@ export function StepEdge({
             targetY,
             sourcePosition,
             targetPosition,
-            curvature: 0.32,
+            curvature: 0.32 + Math.min(0.36, spread * 0.11),
           })
         : getSmoothStepPath({
             sourceX,
@@ -58,10 +67,12 @@ export function StepEdge({
             sourcePosition,
             targetPosition,
             borderRadius: 18,
-            offset: 30,
+            offset: 30 + spread * 16,
           });
 
   if (!data) return null;
+
+  const offset = data.labelOffset ?? { x: 0, y: 0 };
 
   const severity = highestSeverity(data.diagnostics);
   const highlighted = selected || data.highlighted;
@@ -122,7 +133,7 @@ export function StepEdge({
             .filter(Boolean)
             .join(' ')}
           style={{
-            transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
+            transform: `translate(-50%, -50%) translate(${labelX + offset.x}px, ${labelY + offset.y}px)`,
           }}
           onClick={(event) => {
             event.stopPropagation();

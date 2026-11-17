@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useMemo, type ReactNode } from 'react';
-import type { GraphView, LayoutMap, StudioConfig } from '@ss14-studio/core';
+import type {
+  ConstructionNode,
+  GraphView,
+  LayoutMap,
+  StudioConfig,
+} from '@ss14-studio/core';
 import {
   Background,
   BackgroundVariant,
@@ -41,6 +46,12 @@ import { ValidationTray } from './ValidationTray';
 
 const nodeTypes = { studio: GraphNode } as unknown as NodeTypes;
 const edgeTypes = { studio: StepEdge } as unknown as EdgeTypes;
+
+/** Prototypes whose sprites can represent a node, primary first. */
+function iconEntitiesFor(node: ConstructionNode): string[] {
+  if (node.iconEntities && node.iconEntities.length > 0) return node.iconEntities;
+  return node.entity ? [node.entity] : [];
+}
 
 interface GraphWorkspaceProps {
   graph: GraphView;
@@ -105,7 +116,7 @@ function FlowCanvas({
   useEffect(() => {
     if (!config.graphSprites) return;
     for (const node of graph.nodes) {
-      if (node.entity) onRequestIcon(node.entity);
+      for (const entity of iconEntitiesFor(node)) onRequestIcon(entity);
     }
   }, [config.graphSprites, graph.nodes, onRequestIcon]);
 
@@ -144,6 +155,15 @@ function FlowCanvas({
           steps += edge.steps.length;
           conditions += edge.conditions.length;
         }
+        const iconEntities = iconEntitiesFor(node);
+        const primaryEntity = iconEntities[0] ?? node.entity ?? null;
+        let sprite = null as ReturnType<typeof sheetFromIcon>;
+        for (const entity of iconEntities) {
+          const icon = icons[entity];
+          if (!icon) continue;
+          sprite = sheetFromIcon(icon);
+          break;
+        }
         return {
           id: node.name,
           type: 'studio',
@@ -162,7 +182,9 @@ function FlowCanvas({
             conditions,
             dimmed: hasPath && !path.nodes.has(node.name),
             highlighted: hasPath && path.nodes.has(node.name),
-            sprite: node.entity ? sheetFromIcon(icons[node.entity]) : null,
+            sprite,
+            iconEntities,
+            primaryEntity,
             config,
           },
           ariaLabel: `Construction node ${node.name}`,
@@ -184,6 +206,14 @@ function FlowCanvas({
   );
 
   const desiredEdges = useMemo<StudioGraphEdge[]>(() => {
+    const pairTotals = new Map<string, number>();
+    for (const node of graph.nodes) {
+      for (const edge of node.edges) {
+        const key = `${node.name}->${edge.target}`;
+        pairTotals.set(key, (pairTotals.get(key) ?? 0) + 1);
+      }
+    }
+    const pairSeen = new Map<string, number>();
     const edges: StudioGraphEdge[] = [];
     for (const node of graph.nodes) {
       node.edges.forEach((edge, index) => {
@@ -194,6 +224,17 @@ function FlowCanvas({
           path.edges.has(id) &&
           !(selection?.kind === 'edge' && selection.index !== index);
         const edgeDiagnostics = maps.edge.get(id) ?? [];
+        const pairKey = `${node.name}->${edge.target}`;
+        const total = pairTotals.get(pairKey) ?? 1;
+        const parallelIndex = pairSeen.get(pairKey) ?? 0;
+        pairSeen.set(pairKey, parallelIndex + 1);
+        const labelOffset =
+          total > 1
+            ? {
+                x: 0,
+                y: (parallelIndex - (total - 1) / 2) * 22,
+              }
+            : null;
         edges.push({
           id,
           type: 'studio',
@@ -213,6 +254,9 @@ function FlowCanvas({
             highlighted,
             edgeStyle: config.graphEdgeStyle,
             showSummary: config.graphEdgeSteps,
+            parallelIndex,
+            parallelCount: total,
+            labelOffset,
             onSelect: () =>
               onSelect({
                 kind: 'edge',
@@ -265,7 +309,8 @@ function FlowCanvas({
       edgeTypes={edgeTypes}
       onNodeClick={(_event, node) => onSelect({ kind: 'node', node: node.id })}
       onNodeDoubleClick={(_event, node) => {
-        if (node.data?.model.entity) onOpenPrototype(node.data.model.entity);
+        const target = node.data?.primaryEntity ?? node.data?.model.entity;
+        if (target) onOpenPrototype(target);
       }}
       onEdgeClick={(_event, edge) => {
         if (!edge.data) return;
@@ -378,10 +423,12 @@ export function GraphWorkspace({
   const diagnostics = graph.diagnostics;
   const errors = diagnostics.filter((diagnostic) => diagnostic.severity === 'error').length;
   const warnings = diagnostics.filter((diagnostic) => diagnostic.severity === 'warning').length;
-  const selectedEntity =
+  const selectedNode =
     selection?.kind === 'node'
-      ? graph.nodes.find((node) => node.name === selection.node)?.entity ?? null
-      : null;
+      ? graph.nodes.find((node) => node.name === selection.node)
+      : undefined;
+  const selectedEntity =
+    selectedNode?.iconEntities?.[0] ?? selectedNode?.entity ?? null;
 
   const totalSteps = graph.nodes.reduce(
     (sum, node) => sum + node.edges.reduce((edgeSum, edge) => edgeSum + edge.steps.length, 0),

@@ -282,6 +282,16 @@ describe('RSI operations', () => {
     expect(roundTrip.custom).toBe('kept');
     expect(roundTrip.size).toEqual({ x: 32, y: 32 });
     expect(roundTrip.states).toHaveLength(2);
+    const states = roundTrip.states as Record<string, unknown>[];
+    expect(states[0]).not.toHaveProperty('directions');
+    expect(states[0]).not.toHaveProperty('delays');
+    expect(states[1]?.directions).toBe(4);
+    expect(states[1]?.delays).toEqual([
+      [0.1, 0.2],
+      [0.1, 0.2],
+      [0.15, 0.15],
+      [0.2],
+    ]);
     expect(text.endsWith('\n')).toBe(true);
 
     expect(findOrphanImages(parsedMeta(), ['icon.png', 'walk.png', 'old.png', 'readme.txt'])).toEqual([

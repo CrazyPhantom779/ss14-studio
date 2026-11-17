@@ -19,12 +19,21 @@ export type StudioNodeData = {
   dimmed: boolean;
   highlighted: boolean;
   sprite: SpriteFrameSource | null;
+  /** Prototypes whose sprites can be shown for this node, primary first. */
+  iconEntities: string[];
+  /** Entity opened by double-clicking the node. */
+  primaryEntity: string | null;
   config: StudioConfig;
 };
 
 export type StudioGraphNode = Node<StudioNodeData, 'studio'>;
 
-function accentFor(model: ConstructionNode, isStart: boolean, mode: StudioConfig['graphNodeAccent']) {
+function accentFor(
+  model: ConstructionNode,
+  isStart: boolean,
+  mode: StudioConfig['graphNodeAccent'],
+  primaryEntity: string | null,
+) {
   if (mode === 'mono') {
     return {
       hue: 192,
@@ -34,7 +43,10 @@ function accentFor(model: ConstructionNode, isStart: boolean, mode: StudioConfig
     };
   }
   if (mode === 'kind') {
-    return nodeAccent(model.entity ? `kind:${model.entity}` : `kind:${model.name}`, isStart);
+    return nodeAccent(
+      primaryEntity ? `kind:${primaryEntity}` : `kind:${model.name}`,
+      isStart,
+    );
   }
   return nodeAccent(model.name, isStart);
 }
@@ -50,12 +62,16 @@ export function GraphNode({ data, selected }: NodeProps<StudioGraphNode>) {
     dimmed,
     highlighted,
     sprite,
+    iconEntities,
+    primaryEntity,
     config,
   } = data;
-  const accent = accentFor(model, isStart, config.graphNodeAccent);
+  const accent = accentFor(model, isStart, config.graphNodeAccent, primaryEntity);
   const severity = highestSeverity(diagnostics);
-  const initials = initialsFor(model.entity ?? model.name);
+  const label = primaryEntity ?? model.entity ?? model.name;
+  const initials = initialsFor(label);
   const showSprite = Boolean(sprite && config.graphSprites);
+  const variants = iconEntities.length;
 
   return (
     <div
@@ -92,18 +108,20 @@ export function GraphNode({ data, selected }: NodeProps<StudioGraphNode>) {
       <header className="node-head">
         <span className={`node-glyph ${showSprite ? 'with-sprite' : ''}`} style={{ background: accent.gradient }}>
           {showSprite && sprite ? (
-            <SpriteFrame sheet={sprite} size={config.graphCompact ? 24 : 30} title={model.entity ?? model.name} />
+            <SpriteFrame sheet={sprite} size={config.graphCompact ? 24 : 30} title={label} />
           ) : isStart ? (
             <Flag size={14} aria-hidden />
           ) : (
             <span>{initials}</span>
           )}
+          {variants > 1 ? <span className="node-variant-badge" title={`${variants} sprite variants`}>+{variants - 1}</span> : null}
         </span>
         <div className="node-heading">
           <span className="node-name">{model.name}</span>
           {config.graphEntityIds && !config.graphCompact ? (
-            <span className="node-entity" title={model.entity ?? 'Inherited entity'}>
-              {model.entity ?? 'inherited entity'}
+            <span className="node-entity" title={iconEntities.length > 0 ? iconEntities.join('\n') : 'Inherited entity'}>
+              {label}
+              {variants > 1 ? <em className="node-variant-count"> · {variants} variants</em> : null}
             </span>
           ) : null}
         </div>
@@ -127,6 +145,7 @@ export function GraphNode({ data, selected }: NodeProps<StudioGraphNode>) {
             {steps}
           </span>
           {conditions > 0 ? <span className="condition-chip">{conditions} cond.</span> : null}
+          {variants > 1 ? <span className="variant-chip" title={iconEntities.join('\n')}>{variants} variants</span> : null}
           {incoming > 0 ? <span className="incoming-chip">{incoming} in</span> : null}
         </div>
       ) : null}

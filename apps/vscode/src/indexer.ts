@@ -1,7 +1,12 @@
 import * as vscode from 'vscode';
 import {
   buildCSharpView,
+  buildGraphAtlas,
   collectTagUsage,
+  constructionDisplayEntity,
+  defaultXamlTheme,
+  enrichGraphIcons,
+  extractXamlThemes,
   mayContainConstructionGraph,
   parseCSharpFile,
   parseFluent,
@@ -9,9 +14,11 @@ import {
   parsePrototypeFile,
   PrototypeRegistry,
   validateGraph,
+  type AtlasConstructionLink,
   type ConstructionGraph,
   type CSharpIndexFile,
   type CSharpView,
+  type GraphAtlas,
   type GraphSummary,
   type IndexPayload,
   type ParsedGraphFile,
@@ -24,6 +31,7 @@ import {
   type SpriteInfo,
   type TagUsage,
   type XamlClassEntry,
+  type XamlTheme,
 } from '@ss14-studio/core';
 
 interface Root {
@@ -162,6 +170,28 @@ export class GraphIndex implements vscode.Disposable {
     return this.graphs.get(key);
   }
 
+  getGraphs(): ConstructionGraph[] {
+    return [...this.graphs.values()];
+  }
+
+  /** Build the workspace-wide construction atlas, including recipe links. */
+  getAtlas(): GraphAtlas {
+    return buildGraphAtlas(this.getGraphs(), {
+      constructionLinks: this.constructionLinks(),
+    });
+  }
+
+  /** Every UI theme that can be previewed in the XAML designer. */
+  getXamlThemes(): XamlTheme[] {
+    this.ensureRegistry();
+    if (!this.registry) return [defaultXamlTheme([])];
+    return extractXamlThemes({
+      records: this.registry.records,
+      resolve: (id, kind) => this.registry?.resolve(id, kind) ?? null,
+      localization: this.localization,
+    });
+  }
+
   getSummaries(): GraphSummary[] {
     return this.payload.summaries;
   }
@@ -228,13 +258,22 @@ export class GraphIndex implements vscode.Disposable {
     const key = uri.toString();
     const records = this.prototypeRecords.filter((candidate) => candidate.filePath !== key);
     records.push(...parsed.prototypes);
-    const registry = new PrototypeRegistry(records, this.localization);
+    const registry = new PrototypeRegistry(
+      records,
+      this.localization,
+      this.getGraphs(),
+    );
     return registry.view(record.id, record.kind);
   }
 
   getEntitySprite(entityId: string): SpriteInfo | null {
     this.ensureRegistry();
-    return this.registry?.resolve(entityId)?.sprite ?? null;
+    return this.registry?.spriteFor(entityId) ?? null;
+  }
+
+  getBoardTargets(component: string): { board: string; entity: string }[] {
+    this.ensureRegistry();
+    return this.registry?.boardTargets(component) ?? [];
   }
 
   resolveLocalization(key: string): string | undefined {
@@ -400,7 +439,11 @@ export class GraphIndex implements vscode.Disposable {
 
   private ensureRegistry(): void {
     if (this.registry) return;
-    this.registry = new PrototypeRegistry(this.prototypeRecords, this.localization);
+    this.registry = new PrototypeRegistry(
+      this.prototypeRecords,
+      this.localization,
+      this.getGraphs(),
+    );
   }
 
   private partialFor(relativePath: string): PartialDeclaration | null {
@@ -676,18 +719,67 @@ export class GraphIndex implements vscode.Disposable {
   ): void {
     this.prototypeRecords = records;
     this.prototypeFileRecords = files;
-    this.registry = new PrototypeRegistry(records, this.localization);
+    this.registry = new PrototypeRegistry(
+      records,
+      this.localization,
+      this.getGraphs(),
+    );
     this.prototypes = this.registry.indexPayload(partialFiles, Date.now() - started);
+    this.enrichGraphs();
     this.prototypeEmitter.fire(this.prototypes);
+    this.changeEmitter.fire(this.payload);
   }
 
   private rebuildPrototypeData(): void {
-    this.registry = new PrototypeRegistry(this.prototypeRecords, this.localization);
+    this.registry = new PrototypeRegistry(
+      this.prototypeRecords,
+      this.localization,
+      this.getGraphs(),
+    );
     this.prototypes = this.registry.indexPayload(
       this.partialDeclarations.map((declaration) => declaration.path),
       this.prototypes.scanDurationMs,
     );
+    this.enrichGraphs();
     this.prototypeEmitter.fire(this.prototypes);
+    this.changeEmitter.fire(this.payload);
+  }
+
+  /** Fill graph node icons after both graphs and prototypes are indexed. */
+  private enrichGraphs(): void {
+    this.ensureRegistry();
+    if (!this.registry) return;
+    for (const graph of this.graphs.values()) {
+      enrichGraphIcons(graph, this.registry);
+    }
+  }
+
+  /** Construction recipes that point at a node in another graph. */
+  private constructionLinks(): AtlasConstructionLink[] {
+    this.ensureRegistry();
+    if (!this.registry) return [];
+    const graphs = this.getGraphs();
+    const links: AtlasConstructionLink[] = [];
+    for (const record of this.registry.records) {
+      if (record.kind !== 'construction' || record.abstract || record.partial.partial) {
+        continue;
+      }
+      const resolved = this.registry.resolve(record.id, 'construction');
+      if (!resolved) continue;
+      const graphId =
+        typeof resolved.fields.graph === 'string' ? resolved.fields.graph : null;
+      const targetNode =
+        typeof resolved.fields.targetNode === 'string'
+          ? resolved.fields.targetNode
+          : null;
+      if (!graphId || !targetNode) continue;
+      const graph = graphs.find((candidate) => candidate.id === graphId);
+      if (!graph) continue;
+      const entity = constructionDisplayEntity(graph, targetNode, this.registry);
+      if (!entity) continue;
+      links.push({ graphId, graphKey: graph.key, targetNode, entity });
+    }
+    return links;
   }
 
   private async findPrototypeFiles(): Promise<vscode.Uri[]> {
@@ -962,7 +1054,6 @@ export class GraphIndex implements vscode.Disposable {
     } else {
       this.prototypeFileRecords.delete(fileKey);
     }
-    this.rebuildPrototypeData();
 
     const removed = this.fileGraphs.get(fileKey) ?? [];
     for (const key of removed) {
@@ -982,6 +1073,9 @@ export class GraphIndex implements vscode.Disposable {
       }
     }
 
+    // Graphs and prototypes must both be current before construction recipes
+    // and graph node icons can resolve their target sprites.
+    this.rebuildPrototypeData();
     this.rebuildPayload();
   }
 

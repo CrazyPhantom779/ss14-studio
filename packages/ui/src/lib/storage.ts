@@ -42,30 +42,45 @@ export interface StoragePlacement {
   overflow: boolean;
 }
 
+/** Minimal shape shared by StorageView and each StorageContainerView. */
+export type StoragePlacementView = Pick<
+  StorageView,
+  'grid' | 'columns' | 'rows' | 'items'
+>;
+
 /**
  * Map StorageFill contents onto grid coordinates. Items whose slot is null or
  * outside the grid are returned in the overflow tray.
  */
-export function placeStorageItems(storage: StorageView): StoragePlacement[] {
+export function placeStorageItems(storage: StoragePlacementView): StoragePlacement[] {
   return storage.items.map((item) => {
+    const rotated =
+      item.rotation != null && Math.abs(item.rotation % 180) === 90;
+    const width = rotated ? item.footprint.height : item.footprint.width;
+    const height = rotated ? item.footprint.width : item.footprint.height;
+    const hasPosition = item.x != null && item.y != null;
     const cell = item.slot == null ? undefined : storage.grid[item.slot];
-    if (!cell) {
+    if (!hasPosition && !cell) {
       return {
         item,
         x: 0,
         y: 0,
-        width: item.footprint.width,
-        height: item.footprint.height,
+        width,
+        height,
         overflow: true,
       };
     }
+    const x = hasPosition ? item.x! : cell!.x;
+    const y = hasPosition ? item.y! : cell!.y;
     return {
       item,
-      x: cell.x,
-      y: cell.y,
-      width: Math.max(cell.width, item.footprint.width),
-      height: Math.max(cell.height, item.footprint.height),
-      overflow: false,
+      x,
+      y,
+      width: Math.max(hasPosition ? width : cell!.width, width),
+      height: Math.max(hasPosition ? height : cell!.height, height),
+      overflow:
+        hasPosition &&
+        (x < 0 || y < 0 || x >= storage.columns || y >= storage.rows),
     };
   });
 }

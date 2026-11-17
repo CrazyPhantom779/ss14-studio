@@ -7,8 +7,10 @@ import {
   applyTextEdits,
   applyXamlOperation,
   buildRsiView,
+  defaultXamlTheme,
   diffText,
   EditFailure,
+  enrichGraphIcons,
   findOrphanImages,
   localizeXamlText,
   parseRsiMeta,
@@ -38,6 +40,7 @@ import {
   type XamlDesignNode,
   type XamlImageInfo,
   type XamlOperation,
+  type XamlTheme,
   type XamlView,
 } from '@ss14-studio/core';
 import { ProjectIndex, type StudioStatus } from './indexer.js';
@@ -105,6 +108,8 @@ export class StudioSession {
         this.broadcast({ type: 'index', payload });
         if (this.ready && this.currentView.kind === 'graph') {
           void this.showGraph(this.currentView.key, 'update');
+        } else if (this.ready && this.currentView.kind === 'atlas') {
+          this.postAtlas();
         }
       },
       onPrototypes: (payload) => {
@@ -115,6 +120,8 @@ export class StudioSession {
             this.currentView.id,
             this.currentView.kindFilter,
           );
+        } else if (this.ready && this.currentView.kind === 'atlas') {
+          this.postAtlas();
         }
       },
       onProgress: (progress) => {
@@ -157,6 +164,9 @@ export class StudioSession {
           break;
         case 'openDashboard':
           await this.openDashboard();
+          break;
+        case 'openAtlas':
+          await this.openAtlas();
           break;
         case 'openSource':
           await this.openSource(
@@ -406,6 +416,14 @@ export class StudioSession {
     await this.showGraph(key, 'open');
   }
 
+  async openAtlas(): Promise<void> {
+    this.currentView = { kind: 'atlas' };
+    this.currentKey = undefined;
+    this.currentDiff = undefined;
+    this.post({ type: 'view', view: this.currentView });
+    this.postAtlas();
+  }
+
   async openAbout(): Promise<void> {
     this.currentView = { kind: 'about' };
     this.currentDiff = undefined;
@@ -601,6 +619,10 @@ export class StudioSession {
         this.post({ type: 'view', view: this.currentView });
         this.post({ type: 'graph', graph: null, reason: 'open' });
         break;
+      case 'atlas':
+        this.post({ type: 'view', view: this.currentView });
+        this.postAtlas();
+        break;
       case 'graph':
         await this.showGraph(this.currentView.key, 'update');
         break;
@@ -693,6 +715,10 @@ export class StudioSession {
     this.post({ type: 'prototype', view });
   }
 
+  private postAtlas(): void {
+    this.post({ type: 'atlas', atlas: this.index.getAtlas() });
+  }
+
   private async postRsi(path: string): Promise<void> {
     const loaded = await this.readRsi(path);
     this.currentView = { kind: 'rsi', path: loaded?.dir ?? path };
@@ -767,11 +793,14 @@ export class StudioSession {
     try {
       const { text } = await readTextFile(indexed.filePath);
       const parsed = this.index.parseText(indexed.filePath, text);
-      return (
-        parsed.graphs.find((graph) => graph.key === key) ??
-        parsed.graphs.find((graph) => graph.id === indexed.id) ??
-        indexed
-      );
+      const graph =
+        parsed.graphs.find((candidate) => candidate.key === key) ??
+        parsed.graphs.find((candidate) => candidate.id === indexed.id) ??
+        indexed;
+      return enrichGraphIcons(graph, {
+        hasEntity: (id) => this.index.getPrototypeSummary(id) != null,
+        boardTargets: (component) => this.index.getBoardTargets(component),
+      });
     } catch {
       return indexed;
     }
@@ -1486,7 +1515,31 @@ export class StudioSession {
       await Promise.all(node.children.map(walk));
     };
     if (view.design) await walk(view.design);
+
+    const themes = this.index.getXamlThemes();
+    view.themes = await Promise.all(
+      themes.map((theme) => this.resolveThemeTextures(theme)),
+    );
+    const selected =
+      view.themes.find((theme) => theme.id === view.theme?.id) ??
+      defaultXamlTheme(view.themes);
+    view.theme = selected;
     return view;
+  }
+
+  private async resolveThemeTextures(theme: XamlTheme): Promise<XamlTheme> {
+    if (!theme.texturePaths) return theme;
+    const textures: Record<string, string> = {};
+    for (const [key, path] of Object.entries(theme.texturePaths)) {
+      const resolved = this.index.resolveResourcePath(path);
+      if (!resolved) continue;
+      try {
+        textures[key] = dataUrl(await fs.readFile(resolved));
+      } catch {
+        // Missing optional theme art should not hide the palette.
+      }
+    }
+    return { ...theme, textures };
   }
 
   private async resolveXamlImage(

@@ -11,6 +11,32 @@ SS14 Studio is an AI-generated, human-reviewed alpha project. Read the
 
 ### Added
 
+- **All-graph atlas:** a dashboard action draws the entire repository as one
+  clustered construction-graph map with folder clusters, search dimming,
+  pan/zoom, fit, click-through and links from construction recipes to the
+  entities they build.
+- **Graph layout and sprites:** overlap-safe auto-layout and new-node placement,
+  sprite/board variants on nodes, `iconEntities` primary-first rendering,
+  variant badges, primary-entity double-click and staggered parallel edge
+  labels. Every node now resolves a sprite, including `TransFlag`, computer,
+  machine and desktop board variants.
+- **XAML UI themes:** `styleTheme` and `uiTheme` prototypes are extracted into a
+  designer theme picker with palette swatches. The selected palette overrides
+  the designer CSS variables, and nine-slice window/header/button/panel textures
+  are resolved for every theme; explicit XAML colours still win.
+- **Container previews:** `ContainerFill`, `EntityTableContainerFill`,
+  `startingGear`, `entityTable` and `ItemSlots` are previewed alongside
+  `StorageFill`. Selectors and nested tables expand, items are packed by
+  footprint and rotation, and a spawn summary lists every container. Editing
+  remains limited to `StorageFill`.
+- **Display sprites:** construction recipes resolve `graph` + `targetNode` to
+  their produced entity, uplink `listing` products and board products show
+  sprites, entity sprites win over duplicate prototype ids, and entity tables
+  and `OptionsVisualizer` layers provide fallbacks.
+- **Publishing:** marketplace jobs for VS Code Marketplace, Open VSX and
+  JetBrains Marketplace (skipped when secrets are absent), plus
+  [`PUBLISHING.md`](./PUBLISHING.md) with repository creation, GitHub settings,
+  secrets, versioning, auto-update behaviour and release-day checklists.
 - **XAML simulated rendering:** resolved Fluent text and tooltips, RobustToolbox
   colours, RSI/texture/entity images, selected-element attributes and linked C#
   context in the approximate designer.
@@ -28,19 +54,24 @@ SS14 Studio is an AI-generated, human-reviewed alpha project. Read the
 - **Formatting settings:** XAML indentation (four spaces by default) and RSI
   `meta.json` indentation/final newline (two spaces plus newline by default) in
   the Studio settings drawer and host settings.
-- Expanded automated coverage to **181 tests across 23 files** (109 core, 39 UI
-  and 33 Rider sidecar), including storage, C#, sprite layers, inherited sprites,
-  prototype diagnostics, component/storage edits and formatting sanitization.
 - Automated test coverage for graph analysis, validation, YAML helpers,
   prototype parsing and editing, RSI metadata and operations, XAML parsing and
-  cleanup, text diffing, graph UI helpers, layout, step fields, selection and the
-  Rider sidecar.
+  cleanup, text diffing, graph UI helpers, layout, step fields, selection, atlas,
+  themes, graph icons, storage and the Rider sidecar.
 - Committed Rider fixture project at `apps/rider/fixtures/sample-project`.
 - GitHub Actions CI matrix for Ubuntu and Windows, VS Code VSIX packaging,
   Rider sidecar smoke test, Rider plugin build and tagged-release publishing.
 - CodeQL, dependency review and Dependabot configuration.
 - Issue forms, pull request template, contributing guide, code of conduct,
   security policy and release-note categories.
+
+### Changed
+
+- RSI `meta.json` output omits `directions` for single-direction states and
+  `delays` for single-frame states.
+- The Rider sidecar smoke test now also checks sprite resolution and the atlas.
+- Expanded automated coverage to **193 tests across 26 files** (118 core, 42 UI
+  and 33 Rider sidecar).
 
 ### Fixed
 
@@ -55,6 +86,10 @@ SS14 Studio is an AI-generated, human-reviewed alpha project. Read the
   indentation instead of the sequence dash indentation.
 - `file:` path arguments in the Rider sidecar now resolve with
   `fileURLToPath`, so Windows paths keep native separators and UNC paths work.
+- Storage items now honour explicit `x`/`y` positions and stored rotations in
+  the visual grid.
+- Construction graph auto-layout no longer produces coincident slots for
+  disconnected nodes, and new nodes never land on user-arranged nodes.
 
 ## [0.2.0] - 2026-11-15
 

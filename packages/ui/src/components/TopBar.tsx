@@ -9,6 +9,7 @@ import {
   Info,
   Layers,
   LayoutDashboard,
+  Network,
   PanelLeft,
   RefreshCw,
   Settings2,
@@ -32,6 +33,8 @@ function viewLabel(view: WorkspaceView, graph: GraphView | null): string | null 
   switch (view.kind) {
     case 'dashboard':
       return null;
+    case 'atlas':
+      return 'Construction atlas';
     case 'graph':
       return graph?.id ?? 'Construction graph';
     case 'prototype':
@@ -52,6 +55,7 @@ function viewLabel(view: WorkspaceView, graph: GraphView | null): string | null 
 }
 
 function ViewIcon({ view }: { view: WorkspaceView }) {
+  if (view.kind === 'atlas') return <Network size={13} aria-hidden />;
   if (view.kind === 'prototype') return <Layers size={13} aria-hidden />;
   if (view.kind === 'rsi') return <ImageIcon size={13} aria-hidden />;
   if (view.kind === 'xaml') return <Braces size={13} aria-hidden />;

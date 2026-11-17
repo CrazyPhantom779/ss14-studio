@@ -295,6 +295,8 @@ function parseNode(ctx: ParseContext, input: Node, index: number): ConstructionN
   const entityNode = resolveNode(ctx, getNode(node, 'entity'));
   const entityScalar = stringValue(entityNode);
   const entityType = entityNode && isMap(entityNode) ? tagType(entityNode.tag) : null;
+  const entityFields =
+    entityNode && isMap(entityNode) ? mappingFields(entityNode) : null;
 
   const edges: ConstructionEdge[] = [];
   for (const edgeNode of sequenceItems(resolveNode(ctx, getNode(node, 'edges')))) {
@@ -308,6 +310,7 @@ function parseNode(ctx: ParseContext, input: Node, index: number): ConstructionN
     entity: entityScalar,
     entitySpan: spanOf(entityNode, ctx.lines),
     entityType,
+    entityFields,
     actions: parseTaggedSeq(ctx, getNode(node, 'actions'), 'node actions'),
     transforms: parseTaggedSeq(ctx, getNode(node, 'transform'), 'node transforms'),
     doNotReplaceInheritingEntities: booleanValue(

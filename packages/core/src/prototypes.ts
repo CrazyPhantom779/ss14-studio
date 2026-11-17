@@ -18,6 +18,7 @@ import {
   type YAMLMap,
 } from 'yaml';
 import type {
+  ConstructionGraph,
   Diagnostic,
   InheritanceNode,
   LocalizationEntry,
@@ -39,7 +40,12 @@ import type {
   SpriteLayerInfo,
   TextEdit,
 } from './model.js';
-import { extractStorage } from './storage.js';
+import {
+  extractStorage,
+  itemFootprintFromFields,
+  itemRotationFromFields,
+} from './storage.js';
+import { constructionDisplayEntity } from './graphIcons.js';
 import {
   LineIndex,
   booleanValue,
@@ -500,6 +506,35 @@ function componentField(
   return components.find((component) => component.type === type)?.fields[field];
 }
 
+/** Find the first concrete entity id in a selector tree or fill mapping. */
+function firstSelectorId(value: unknown, depth = 0): string | null {
+  if (depth > 12 || value == null) return null;
+  if (typeof value === 'string') return value.trim() || null;
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const id = firstSelectorId(entry, depth + 1);
+      if (id) return id;
+    }
+    return null;
+  }
+  if (typeof value !== 'object') return null;
+  const record = value as Record<string, unknown>;
+  const direct = record.id ?? record.entity ?? record.prototype ?? record.startingItem;
+  if (typeof direct === 'string' && direct.trim()) return direct.trim();
+  for (const key of ['children', 'table', 'equipment', 'storage', 'inhand', 'contents', 'items']) {
+    const id = firstSelectorId(record[key], depth + 1);
+    if (id) return id;
+  }
+  for (const [key, entry] of Object.entries(record)) {
+    if (['options', 'data', 'tableId', 'orGroup', 'amount', 'prob', 'weight', 'rolls'].includes(key)) {
+      continue;
+    }
+    const id = firstSelectorId(entry, depth + 1);
+    if (id) return id;
+  }
+  return null;
+}
+
 function normalizeSpritePath(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   const normalized = value
@@ -641,6 +676,15 @@ export function extractSprite(
       });
     }
 
+    // Some forks replace the Sprite component with OptionsVisualizer, or use
+    // OptionsVisualizer to swap the base sprite for accessibility options. Use
+    // the first (Default) option when the Sprite component has no usable
+    // texture of its own.
+    if (layers.length === 0) {
+      const visual = optionsVisualSprite(components);
+      if (visual) return visual;
+    }
+
     if (layers.length === 0) continue;
     const base = layers[0]!;
     return {
@@ -658,7 +702,79 @@ export function extractSprite(
       extra: spriteMapFields(component.fields, type),
     };
   }
-  return null;
+  return optionsVisualSprite(components);
+}
+
+/**
+ * Resolve the default visual from an OptionsVisualizer component.
+ *
+ * `visuals` maps layer keys to option lists. Each option has `options` (the
+ * accessibility flags that enable it) and `data` (Sprite fields). The first
+ * entry is conventionally the Default option; we use it for explorer icons.
+ */
+function optionsVisualSprite(components: PrototypeComponent[]): SpriteInfo | null {
+  const component = components.find((candidate) => candidate.type === 'OptionsVisualizer');
+  const visuals = component?.fields.visuals;
+  if (!visuals || typeof visuals !== 'object' || Array.isArray(visuals)) return null;
+  const map = visuals as Record<string, unknown>;
+  const keys = Object.keys(map);
+  if (keys.length === 0) return null;
+  const ordered = [
+    ...keys.filter((key) => key === 'base'),
+    ...keys.filter((key) => key !== 'base'),
+  ];
+  const layers: SpriteLayerInfo[] = [];
+  for (const key of ordered) {
+    const options = map[key];
+    if (!Array.isArray(options)) continue;
+    const first = options.find(
+      (entry) =>
+        entry &&
+        typeof entry === 'object' &&
+        !Array.isArray(entry) &&
+        (entry as Record<string, unknown>).data &&
+        typeof (entry as Record<string, unknown>).data === 'object',
+    ) as Record<string, unknown> | undefined;
+    const data = first?.data as Record<string, unknown> | undefined;
+    if (!data) continue;
+    const rsi = normalizeSpritePath(data.sprite) ?? normalizeSpritePath(data.texture);
+    const state = typeof data.state === 'string' ? data.state : null;
+    if (!rsi && !state) continue;
+    layers.push({
+      index: layers.length,
+      rsi,
+      state: state ?? 'icon',
+      texture: rsi && !rsi.endsWith('.rsi') ? rsi : null,
+      color: spriteColor(data.color),
+      scale: spriteNumber(data.scale),
+      offset: spriteOffset(data.offset),
+      visible: data.visible !== false,
+      map: Array.isArray(data.map)
+        ? data.map.join(', ')
+        : typeof data.map === 'string'
+          ? data.map
+          : key,
+      fields: { ...data },
+    });
+    // One base visual is enough for explorer and construction-node icons.
+    if (key === 'base') break;
+  }
+  if (layers.length === 0) return null;
+  const base = layers[0]!;
+  return {
+    rsi: base.rsi,
+    state: base.state,
+    layerState: base.state,
+    color: base.color,
+    scale: base.scale,
+    offset: base.offset,
+    rotation: null,
+    visible: true,
+    component: 'OptionsVisualizer',
+    texture: base.texture,
+    layers,
+    extra: {},
+  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -782,14 +898,29 @@ function recordSet(records: RawPrototype[]): RecordSet {
 export class PrototypeRegistry {
   private readonly set: RecordSet;
   private readonly cache = new Map<string, ResolvedPrototype>();
+  private readonly byId = new Map<string, RawPrototype[]>();
+  private readonly graphsById = new Map<string, ConstructionGraph>();
+  private readonly displayCache = new Map<
+    string,
+    ReturnType<PrototypeRegistry['displayFor']>
+  >();
   private summaryCache: PrototypeSummary[] | null = null;
   private effectiveCache = new Map<string, RawPrototype>();
 
   constructor(
     readonly records: RawPrototype[],
     readonly localization: Map<string, string> = new Map(),
+    graphs: readonly ConstructionGraph[] = [],
   ) {
     this.set = recordSet(records);
+    for (const record of this.set.base.values()) {
+      const list = this.byId.get(record.id) ?? [];
+      list.push(record);
+      this.byId.set(record.id, list);
+    }
+    for (const graph of graphs) {
+      if (!this.graphsById.has(graph.id)) this.graphsById.set(graph.id, graph);
+    }
   }
 
   get size(): number {
@@ -810,12 +941,170 @@ export class PrototypeRegistry {
 
   find(id: string, kind?: string): RawPrototype | undefined {
     if (kind) return this.set.base.get(`${kind}:${id}`);
-    const direct = this.set.base.get(id);
-    if (direct) return direct;
-    for (const record of this.set.base.values()) {
-      if (record.id === id) return record;
+    let fallback: RawPrototype | undefined;
+    for (const record of this.byId.get(id) ?? []) {
+      // Duplicate ids are common (a body prototype and an entity can both be
+      // called Drone). Entities are what users mean in 99% of lookups.
+      if (record.kind === 'entity') return record;
+      if (!fallback || (fallback.abstract && !record.abstract)) fallback = record;
     }
-    return undefined;
+    return fallback;
+  }
+
+  hasEntity(id: string): boolean {
+    return this.set.base.has(`entity:${id}`);
+  }
+
+  private readonly boardTargetCache = new Map<
+    string,
+    { board: string; entity: string }[]
+  >();
+
+  /**
+   * Find every concrete circuit board that produces an entity.
+   *
+   * `component` is the board component type, e.g. `ComputerBoard` or
+   * `MachineBoard`. Used to show board variants on construction graph nodes
+   * whose entity is chosen dynamically at build time.
+   */
+  boardTargets(component: string): { board: string; entity: string }[] {
+    const cached = this.boardTargetCache.get(component);
+    if (cached) return cached;
+    const output: { board: string; entity: string }[] = [];
+    const seen = new Set<string>();
+    for (const record of this.allBaseRecords) {
+      if (record.kind !== 'entity' || record.abstract) continue;
+      const resolved = this.resolveRecord(record, []);
+      if (resolved.abstract) continue;
+      const boardComponent = resolved.components.find(
+        (candidate) => candidate.type === component,
+      );
+      const target = boardComponent
+        ? fieldString(boardComponent.fields, 'prototype')
+        : null;
+      if (!target || seen.has(record.id)) continue;
+      seen.add(record.id);
+      output.push({ board: record.id, entity: target });
+    }
+    this.boardTargetCache.set(component, output);
+    return output;
+  }
+
+  /**
+   * Resolve the sprite a user expects for an id, following the common
+   * "this prototype builds/produces that entity" relationships.
+   */
+  displayFor(
+    id: string,
+    kind?: string,
+    seen = new Set<string>(),
+  ): { entity: string; sprite: SpriteInfo | null; kind: NonNullable<PrototypeSummary['displayKind']> } | null {
+    const top = seen.size === 0;
+    const token = `${kind ?? ''}:${id}`;
+    if (top && this.displayCache.has(token)) {
+      return this.displayCache.get(token) ?? null;
+    }
+    const result = this.resolveDisplay(id, kind, seen);
+    if (top) this.displayCache.set(token, result);
+    return result;
+  }
+
+  private resolveDisplay(
+    id: string,
+    kind: string | undefined,
+    seen: Set<string>,
+  ): { entity: string; sprite: SpriteInfo | null; kind: NonNullable<PrototypeSummary['displayKind']> } | null {
+    const token = `${kind ?? ''}:${id}`;
+    if (seen.has(token)) return null;
+    seen.add(token);
+    const record = this.find(id, kind);
+    if (!record) return null;
+    const resolved = this.resolveRecord(record, []);
+    if (resolved.sprite) {
+      return {
+        entity: resolved.id,
+        sprite: resolved.sprite,
+        kind: 'self',
+      };
+    }
+
+    const follow = (
+      target: string | null | undefined,
+      targetKind: string | undefined,
+      displayKind: NonNullable<PrototypeSummary['displayKind']>,
+    ) =>
+      target
+        ? this.displayFor(target, targetKind, seen) ?? {
+            entity: target,
+            sprite: null,
+            kind: displayKind,
+          }
+        : null;
+
+    if (record.kind === 'listing') {
+      const target =
+        fieldString(resolved.fields, 'productEntity') ??
+        fieldString(resolved.fields, 'product');
+      const display = follow(target, 'entity', 'listing');
+      if (display?.sprite) return { ...display, kind: 'listing' };
+    }
+
+    if (record.kind === 'ComputerBoard' || record.kind === 'MachineBoard') {
+      const target = fieldString(resolved.fields, 'prototype');
+      const display = follow(target, 'entity', 'board');
+      if (display?.sprite) return { ...display, kind: 'board' };
+    }
+
+    const boardComponent = resolved.components.find(
+      (component) => component.type === 'ComputerBoard' || component.type === 'MachineBoard',
+    );
+    const boardTarget = boardComponent ? fieldString(boardComponent.fields, 'prototype') : null;
+    if (boardTarget) {
+      const display = follow(boardTarget, 'entity', 'board');
+      if (display?.sprite) return { ...display, kind: 'board' };
+    }
+
+    if (record.kind === 'entityTable') {
+      const target = firstSelectorId(resolved.fields.table);
+      const display = follow(target, 'entity', 'entityTable');
+      if (display?.sprite) return { ...display, kind: 'entityTable' };
+    }
+
+    if (record.kind === 'startingGear') {
+      const equipment = resolved.fields.equipment;
+      const target =
+        firstSelectorId(equipment) ??
+        firstSelectorId(resolved.fields.storage) ??
+        firstSelectorId(resolved.fields.inhand);
+      const display = follow(target, 'entity', 'startingGear');
+      if (display?.sprite) return { ...display, kind: 'startingGear' };
+    }
+
+    if (record.kind === 'construction') {
+      // A construction recipe points at a graph node. Resolve that node's
+      // entity first so the YAML viewer shows what the recipe actually builds,
+      // even when the recipe id does not match the entity id.
+      const graphId = fieldString(resolved.fields, 'graph');
+      const targetNode = fieldString(resolved.fields, 'targetNode');
+      const graph = graphId ? this.graphsById.get(graphId) : null;
+      if (graph && targetNode) {
+        const entity = constructionDisplayEntity(graph, targetNode, this);
+        if (entity) {
+          const display = follow(entity, 'entity', 'construction');
+          if (display?.sprite) return { ...display, kind: 'construction' };
+        }
+      }
+      // Recipes are often named after the entity they build. Prefer an entity
+      // with the same id when no graph node data is available here.
+      const display = follow(record.id, 'entity', 'construction');
+      if (display?.sprite) return { ...display, kind: 'construction' };
+    }
+
+    return null;
+  }
+
+  spriteFor(id: string, kind?: string): SpriteInfo | null {
+    return this.displayFor(id, kind)?.sprite ?? null;
   }
 
   private effective(record: RawPrototype): RawPrototype {
@@ -1114,6 +1403,7 @@ export class PrototypeRegistry {
 
   private summaryFor(record: RawPrototype, resolved: ResolvedPrototype): PrototypeSummary {
     const children = this.childrenIndex().get(record.id)?.size ?? 0;
+    const display = resolved.sprite ? null : this.displayFor(record.id, record.kind);
     return {
       key: record.key,
       id: record.id,
@@ -1127,6 +1417,13 @@ export class PrototypeRegistry {
       line: record.line,
       componentCount: resolved.components.length,
       sprite: resolved.sprite,
+      ...(display
+        ? {
+            displaySprite: display.sprite,
+            displayEntity: display.entity,
+            displayKind: display.kind,
+          }
+        : {}),
       partial: record.partial.partial,
       children,
     };
@@ -1216,20 +1513,45 @@ export class PrototypeRegistry {
       });
     }
 
-    const storage = extractStorage(resolved.components, (itemId) => {
+    const resolveItem = (itemId: string) => {
       const item = this.resolve(itemId);
       if (!item) return null;
-      const size = item.components.find((component) => component.type === 'Item')?.fields.size;
+      const itemFields = item.components.find(
+        (component) => component.type === 'Item',
+      )?.fields;
       return {
         name: item.name,
         kind: item.kind,
         sprite: item.sprite,
-        footprint:
-          size === 'Large' || size === 'Huge'
-            ? { width: 2, height: 2 }
-            : { width: 1, height: 1 },
+        footprint: itemFootprintFromFields(itemFields),
+        rotation: itemRotationFromFields(itemFields),
       };
+    };
+    const resolveTable = (tableId: string) => {
+      const table = this.find(tableId, 'entityTable');
+      if (!table) return null;
+      const tableResolved = this.resolveRecord(table, []);
+      return { id: table.id, fields: tableResolved.fields };
+    };
+
+    let storage = extractStorage(resolved.components, resolveItem, resolveTable, {
+      kind: record.kind,
+      fields: resolved.fields,
     });
+    // Jobs reference their gear prototype; show the gear containers on the job.
+    if (!storage && record.kind === 'job') {
+      const gearId = fieldString(resolved.fields, 'startingGear');
+      const gear = gearId ? this.find(gearId, 'startingGear') : null;
+      if (gear) {
+        const gearResolved = this.resolveRecord(gear, []);
+        storage = extractStorage(
+          gearResolved.components,
+          resolveItem,
+          resolveTable,
+          { kind: gear.kind, fields: gearResolved.fields },
+        );
+      }
+    }
     if (storage) {
       diagnostics.push(...storage.diagnostics);
     }
@@ -1243,6 +1565,13 @@ export class PrototypeRegistry {
       partials,
       diagnostics,
       storage,
+      ...(summary.displaySprite
+        ? {
+            displaySprite: summary.displaySprite,
+            displayEntity: summary.displayEntity ?? null,
+            displayKind: summary.displayKind ?? null,
+          }
+        : {}),
     };
   }
 

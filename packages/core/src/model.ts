@@ -75,6 +75,14 @@ export interface ConstructionNode {
   entitySpan: SourceSpan | null;
   /** Tag when entity uses the mapping form, e.g. BoardNodeEntity. */
   entityType: string | null;
+  /** Fields on the tagged entity mapping, e.g. `{ container: board }`. */
+  entityFields?: Record<string, unknown> | null;
+  /**
+   * Entities whose sprites should be shown for this node. Filled in by the
+   * host because resolving prototypes requires the full project index.
+   * The first entry is the primary icon; the rest are board/visual variants.
+   */
+  iconEntities?: string[];
   actions: TaggedEntry[];
   transforms: TaggedEntry[];
   doNotReplaceInheritingEntities: boolean;
@@ -373,6 +381,12 @@ export interface PrototypeSummary {
   line: number;
   componentCount: number;
   sprite: SpriteInfo | null;
+  /** Sprite to show for prototypes that build or produce another prototype. */
+  displaySprite?: SpriteInfo | null;
+  /** Entity/prototype whose sprite is shown in the explorer and atlas. */
+  displayEntity?: string | null;
+  /** How displayEntity was resolved, for diagnostics and tooltips. */
+  displayKind?: 'self' | 'construction' | 'listing' | 'board' | 'entityTable' | 'startingGear' | 'job' | null;
   partial: boolean;
   children: number;
 }
@@ -449,10 +463,48 @@ export interface StorageItemView extends StorageContentInput {
   slot: number | null;
   /** Approximate item footprint in grid cells. */
   footprint: { width: number; height: number };
+  /** Unit-cell origin inside the storage grid, when placed. */
+  x?: number;
+  y?: number;
+  /** Container this item is spawned into, e.g. `entity_storage` or `back`. */
+  container?: string;
+  /** Equipment slot / starting gear slot label, when applicable. */
+  slotName?: string;
+  /** Rotation in degrees applied when the item is stored, when known. */
+  rotation?: number | null;
+  /** True for alternatives produced by a GroupSelector. */
+  alternative?: boolean;
+}
+
+export interface StorageContainerView {
+  /** Container key, e.g. `storagebase`, `entity_storage`, `back`, `equipment`. */
+  id: string;
+  /** Human-readable label. */
+  label: string;
+  /** Component/container form that produced this container. */
+  component:
+    | 'Storage'
+    | 'StorageFill'
+    | 'ContainerFill'
+    | 'EntityTableContainerFill'
+    | 'startingGear'
+    | 'entityTable'
+    | 'listing'
+    | 'ItemSlots'
+    | 'ContainerContainer';
+  grid: StorageGridCell[];
+  columns: number;
+  rows: number;
+  items: StorageItemView[];
+  maxItemSize: string | null;
+  capacity: number;
+  /** True when the studio can safely rewrite this container's contents. */
+  editable: boolean;
+  diagnostics: Diagnostic[];
 }
 
 export interface StorageView {
-  component: 'Storage' | 'StorageFill' | null;
+  component: StorageViewComponent;
   /** True when the prototype has a Storage component. */
   hasStorage: boolean;
   /** True when the prototype has a StorageFill component. */
@@ -463,8 +515,22 @@ export interface StorageView {
   items: StorageItemView[];
   maxItemSize: string | null;
   capacity: number;
+  /** Every container/fill form found on the prototype. */
+  containers: StorageContainerView[];
   diagnostics: Diagnostic[];
 }
+
+export type StorageViewComponent =
+  | 'Storage'
+  | 'StorageFill'
+  | 'ContainerFill'
+  | 'EntityTableContainerFill'
+  | 'startingGear'
+  | 'entityTable'
+  | 'listing'
+  | 'ItemSlots'
+  | 'ContainerContainer'
+  | null;
 
 export interface PrototypeView {
   key: string;
@@ -475,6 +541,10 @@ export interface PrototypeView {
   partials: PartialContribution[];
   diagnostics: Diagnostic[];
   storage: StorageView | null;
+  /** Resolved sprite of the thing this prototype builds/produces, if any. */
+  displaySprite?: SpriteInfo | null;
+  displayEntity?: string | null;
+  displayKind?: PrototypeSummary['displayKind'];
 }
 
 export interface LocalizationEntry {
@@ -495,8 +565,8 @@ export type PrototypeOperation =
       /** Complete field mapping for the component override. */
       fields: Record<string, unknown>;
     }
-  | { kind: 'setStorageContents'; id: string; contents: StorageContentInput[] }
-  | { kind: 'setStorageGrid'; id: string; grid: string[] }
+  | { kind: 'setStorageContents'; id: string; contents: StorageContentInput[]; component?: string; container?: string }
+  | { kind: 'setStorageGrid'; id: string; grid: string[]; component?: string; container?: string }
   | { kind: 'extractPartial'; id: string; fields: string[]; components: string[] };
 
 /* ------------------------------------------------------------------ */
@@ -677,6 +747,22 @@ export interface XamlDesignNode {
   children: XamlDesignNode[];
 }
 
+export interface XamlTheme {
+  id: string;
+  name: string;
+  kind: 'styleTheme' | 'uiTheme';
+  /** True for light themes such as Paper. */
+  light: boolean;
+  /** Palette values keyed by prototype field name, e.g. background, text, accent. */
+  colors: Record<string, string>;
+  /** Texture directory for uiTheme prototypes. */
+  path?: string | null;
+  /** Raw nine-slice texture paths keyed by window/header/button/panel. */
+  texturePaths?: Record<string, string>;
+  /** Host-resolved data URLs for `texturePaths`. */
+  textures?: Record<string, string>;
+}
+
 export interface XamlView {
   filePath: string;
   relativePath: string;
@@ -694,6 +780,10 @@ export interface XamlView {
   completions: XamlCompletion[];
   design: XamlDesignNode | null;
   autoGenerated: boolean;
+  /** UI colour themes discovered in the project's prototype YAML. */
+  themes?: XamlTheme[];
+  /** Theme selected by the host/designer, when one is available. */
+  theme?: XamlTheme | null;
 }
 
 export interface XamlCompletion {
@@ -801,8 +891,61 @@ export interface CSharpView {
   diagnostics: Diagnostic[];
 }
 
+export interface AtlasNode {
+  id: string;
+  graphKey: string;
+  graphId: string;
+  graphFolder: string;
+  name: string;
+  entity: string | null;
+  iconEntities: string[];
+  /** Position relative to the atlas origin. */
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  cluster: string;
+  incoming: number;
+  outgoing: number;
+  isStart: boolean;
+}
+
+export interface AtlasEdge {
+  id: string;
+  source: string;
+  target: string;
+  kind: 'step' | 'entity' | 'construction';
+  label: string | null;
+}
+
+export interface AtlasCluster {
+  id: string;
+  label: string;
+  folder: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  graphs: number;
+  nodes: number;
+}
+
+export interface GraphAtlas {
+  nodes: AtlasNode[];
+  edges: AtlasEdge[];
+  clusters: AtlasCluster[];
+  stats: {
+    graphs: number;
+    nodes: number;
+    edges: number;
+    crossGraphEdges: number;
+    clusters: number;
+  };
+}
+
 export type WorkspaceView =
   | { kind: 'dashboard' }
+  | { kind: 'atlas' }
   | { kind: 'graph'; key: string }
   | { kind: 'prototype'; id: string; kindFilter?: string }
   | { kind: 'rsi'; path: string }
@@ -954,6 +1097,7 @@ export type HostMessage =
   | { type: 'indexProgress'; message: string; done: number; total: number }
   | { type: 'theme'; kind: 'dark' | 'light' | 'high-contrast' }
   | { type: 'prototypes'; payload: PrototypeIndexPayload }
+  | { type: 'atlas'; atlas: GraphAtlas }
   | { type: 'prototype'; view: PrototypeView | null; message?: string }
   | { type: 'rsi'; view: RsiView | null; message?: string }
   | { type: 'xaml'; view: XamlView | null; message?: string }
@@ -968,6 +1112,7 @@ export type WebviewMessage =
   | { type: 'requestIndex' }
   | { type: 'openGraph'; key: string }
   | { type: 'openDashboard' }
+  | { type: 'openAtlas' }
   | { type: 'openSource'; key: string; line?: number; node?: string; edgeIndex?: number }
   | { type: 'openFile'; uri: string }
   | { type: 'saveLayout'; key: string; layout: PersistedLayout }

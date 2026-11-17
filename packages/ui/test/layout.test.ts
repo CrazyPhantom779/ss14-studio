@@ -68,6 +68,53 @@ describe('graph layout', () => {
     expect(positions.done).toBeDefined();
   });
 
+  it('never places a new node on top of a user-arranged node', () => {
+    const existing = { start: { x: 0, y: 0 } };
+    const positions = ensurePositions(graph, existing);
+    const rects = Object.entries(positions).map(([name, position]) => ({
+      name,
+      ...position,
+    }));
+    for (let a = 0; a < rects.length; a++) {
+      for (let b = a + 1; b < rects.length; b++) {
+        const first = rects[a]!;
+        const second = rects[b]!;
+        const overlaps =
+          first.x < second.x + NODE_WIDTH &&
+          first.x + NODE_WIDTH > second.x &&
+          first.y < second.y + NODE_HEIGHT &&
+          first.y + NODE_HEIGHT > second.y;
+        expect(overlaps, `${first.name} overlaps ${second.name}`).toBe(false);
+      }
+    }
+  });
+
+  it('separates disconnected nodes in auto layout', () => {
+    const isolated = graphFrom(`- type: constructionGraph
+  id: Isolated
+  start: alpha
+  graph:
+  - node: alpha
+  - node: beta
+  - node: gamma
+`);
+    const positions = autoLayout(isolated);
+    const rects = Object.values(positions);
+    expect(new Set(rects.map((position) => `${position.x}:${position.y}`)).size).toBe(3);
+    for (let a = 0; a < rects.length; a++) {
+      for (let b = a + 1; b < rects.length; b++) {
+        const first = rects[a]!;
+        const second = rects[b]!;
+        const overlaps =
+          first.x < second.x + NODE_WIDTH &&
+          first.x + NODE_WIDTH > second.x &&
+          first.y < second.y + NODE_HEIGHT &&
+          first.y + NODE_HEIGHT > second.y;
+        expect(overlaps).toBe(false);
+      }
+    }
+  });
+
   it('cleans stale positions when every node is already placed', () => {
     const existing = {
       start: { x: 0, y: 0 },

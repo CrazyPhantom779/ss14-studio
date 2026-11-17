@@ -4,6 +4,53 @@ import type { ConstructionGraph, LayoutMap } from '@ss14-studio/core';
 export const NODE_WIDTH = 272;
 export const NODE_HEIGHT = 132;
 
+interface Point {
+  x: number;
+  y: number;
+}
+
+const NODE_GAP = 28;
+
+/** True when two node rectangles overlap, including a small breathing gap. */
+function overlaps(a: Point, b: Point, gap = NODE_GAP): boolean {
+  return (
+    a.x < b.x + NODE_WIDTH + gap &&
+    a.x + NODE_WIDTH + gap > b.x &&
+    a.y < b.y + NODE_HEIGHT + gap &&
+    a.y + NODE_HEIGHT + gap > b.y
+  );
+}
+
+/**
+ * Push a node down until it no longer collides with anything already placed.
+ * Dagre normally avoids overlaps, but disconnected or unusual multigraphs can
+ * still produce coincident slots; this keeps every node card readable.
+ */
+function freePosition(start: Point, occupied: readonly Point[]): Point {
+  let candidate = {
+    x: Math.round(start.x),
+    y: Math.round(start.y),
+  };
+  for (let attempt = 0; attempt < 400; attempt++) {
+    if (!occupied.some((other) => overlaps(candidate, other))) return candidate;
+    candidate = {
+      x: candidate.x,
+      y: candidate.y + NODE_HEIGHT + NODE_GAP + 6,
+    };
+  }
+  return candidate;
+}
+
+function resolveAutoOverlaps(positions: LayoutMap, names: readonly string[]): LayoutMap {
+  const occupied: Point[] = [];
+  for (const name of names) {
+    const placed = freePosition(positions[name] ?? { x: 0, y: 0 }, occupied);
+    positions[name] = placed;
+    occupied.push(placed);
+  }
+  return positions;
+}
+
 export function autoLayout(graph: ConstructionGraph): LayoutMap {
   const layout = new dagre.graphlib.Graph({ multigraph: true });
   layout.setGraph({
@@ -48,7 +95,10 @@ export function autoLayout(graph: ConstructionGraph): LayoutMap {
         }
       : { x: 0, y: 0 };
   }
-  return positions;
+  return resolveAutoOverlaps(
+    positions,
+    graph.nodes.map((node) => node.name),
+  );
 }
 
 /**
@@ -71,9 +121,22 @@ export function ensurePositions(
   }
 
   const auto = autoLayout(graph);
+  // Reserve every user-placed node first so new nodes cannot land on top of a
+  // node that appears later in the YAML file.
+  const occupied: Point[] = graph.nodes
+    .map((node) => existing[node.name])
+    .filter((position): position is Point => Boolean(position));
+
   const next: LayoutMap = {};
   for (const node of graph.nodes) {
-    next[node.name] = existing[node.name] ?? auto[node.name] ?? { x: 0, y: 0 };
+    const current = existing[node.name];
+    if (current) {
+      next[node.name] = current;
+      continue;
+    }
+    const placed = freePosition(auto[node.name] ?? { x: 0, y: 0 }, occupied);
+    next[node.name] = placed;
+    occupied.push(placed);
   }
   return next;
 }

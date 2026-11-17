@@ -7,8 +7,10 @@ import {
   applyRsiOperation,
   applyXamlOperation,
   buildRsiView,
+  defaultXamlTheme,
   diffText,
   EditFailure,
+  enrichGraphIcons,
   findOrphanImages,
   localizeXamlText,
   parseRsiMeta,
@@ -39,6 +41,7 @@ import {
   type XamlDesignNode,
   type XamlImageInfo,
   type XamlOperation,
+  type XamlTheme,
   type XamlView,
 } from '@ss14-studio/core';
 import { getWebviewHtml } from './html.js';
@@ -119,6 +122,17 @@ export class GraphEditorPanel implements vscode.Disposable {
     this.currentDiff = undefined;
     if (!this.ready) return;
     await this.showGraph(key, 'open');
+  }
+
+  async openAtlas(options: PanelOpenOptions = {}): Promise<void> {
+    await this.ensurePanel(options);
+    this.currentView = { kind: 'atlas' };
+    this.currentKey = undefined;
+    this.currentDiff = undefined;
+    if (!this.ready) return;
+    this.setTitle('Construction atlas');
+    this.post({ type: 'view', view: this.currentView });
+    this.postAtlas();
   }
 
   async openPrototype(
@@ -376,6 +390,9 @@ export class GraphEditorPanel implements vscode.Disposable {
         case 'openDashboard':
           await this.openDashboard();
           break;
+        case 'openAtlas':
+          await this.openAtlas();
+          break;
         case 'openSource':
           await this.openSource(message.key, message.line, message.node, message.edgeIndex);
           break;
@@ -545,6 +562,11 @@ export class GraphEditorPanel implements vscode.Disposable {
         this.post({ type: 'view', view: this.currentView });
         this.post({ type: 'graph', graph: null, reason: 'open' });
         break;
+      case 'atlas':
+        this.post({ type: 'view', view: this.currentView });
+        this.postAtlas();
+        this.setTitle('Construction atlas');
+        break;
       case 'graph':
         await this.showGraph(this.currentView.key, 'update');
         break;
@@ -698,11 +720,16 @@ export class GraphEditorPanel implements vscode.Disposable {
     );
     if (!document) return indexed;
     const parsed = this.index.parseText(uri, document.getText());
-    return (
-      parsed.graphs.find((graph) => graph.key === key) ??
-      parsed.graphs.find((graph) => graph.id === indexed.id) ??
-      indexed
-    );
+    const graph =
+      parsed.graphs.find((candidate) => candidate.key === key) ??
+      parsed.graphs.find((candidate) => candidate.id === indexed.id) ??
+      indexed;
+    // Live parses have no project-wide prototype index, so fill node icons
+    // from the indexed registry before sending the graph to the webview.
+    return enrichGraphIcons(graph, {
+      hasEntity: (id) => this.index.getPrototypeSummary(id) != null,
+      boardTargets: (component) => this.index.getBoardTargets(component),
+    });
   }
 
   private async applyOperation(
@@ -1269,6 +1296,8 @@ export class GraphEditorPanel implements vscode.Disposable {
         return;
       }
       void this.showGraph(this.currentView.key, 'update');
+    } else if (this.currentView.kind === 'atlas') {
+      this.postAtlas();
     }
   }
 
@@ -1282,6 +1311,8 @@ export class GraphEditorPanel implements vscode.Disposable {
         this.currentView.kindFilter,
       );
       if (view) this.post({ type: 'prototype', view });
+    } else if (this.currentView.kind === 'atlas') {
+      this.postAtlas();
     }
   }
 
@@ -1291,6 +1322,10 @@ export class GraphEditorPanel implements vscode.Disposable {
 
   private postPrototypes(): void {
     this.post({ type: 'prototypes', payload: this.index.getPrototypePayload() });
+  }
+
+  private postAtlas(): void {
+    this.post({ type: 'atlas', atlas: this.index.getAtlas() });
   }
 
   private postReadyState(): void {
@@ -1590,7 +1625,32 @@ export class GraphEditorPanel implements vscode.Disposable {
       await Promise.all(node.children.map(walk));
     };
     if (view.design) await walk(view.design);
+
+    const themes = this.index.getXamlThemes();
+    view.themes = await Promise.all(
+      themes.map((theme) => this.resolveThemeTextures(theme)),
+    );
+    const selected =
+      view.themes.find((theme) => theme.id === view.theme?.id) ??
+      defaultXamlTheme(view.themes);
+    view.theme = selected;
     return view;
+  }
+
+  /** Turn style-theme nine-slice textures into data URLs for the webview. */
+  private async resolveThemeTextures(theme: XamlTheme): Promise<XamlTheme> {
+    if (!theme.texturePaths) return theme;
+    const textures: Record<string, string> = {};
+    for (const [key, path] of Object.entries(theme.texturePaths)) {
+      const uri = this.index.resolveResourceUri(path);
+      if (!uri) continue;
+      try {
+        textures[key] = dataUrl(await vscode.workspace.fs.readFile(uri));
+      } catch {
+        // Missing optional theme art should not hide the palette.
+      }
+    }
+    return { ...theme, textures };
   }
 
   private async resolveXamlImage(

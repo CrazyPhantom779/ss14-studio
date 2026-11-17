@@ -4,6 +4,7 @@ import type {
   CSharpView,
   DiffPayload,
   EditResult,
+  GraphAtlas,
   GraphOperation,
   GraphView,
   HostMessage,
@@ -84,6 +85,7 @@ const DEFAULT_CONFIG: StudioConfig = {
 export interface StudioHost {
   index: IndexPayload | null;
   prototypes: PrototypeIndexPayload | null;
+  atlas: GraphAtlas | null;
   graph: GraphView | null;
   prototype: PrototypeView | null;
   rsi: RsiView | null;
@@ -101,6 +103,7 @@ export interface StudioHost {
   icons: Record<string, IconSheet>;
   openGraph: (key: string) => void;
   openDashboard: () => void;
+  openAtlas: () => void;
   openPrototype: (id: string, kind?: string) => void;
   openRsi: (path: string) => void;
   openXaml: (path: string) => void;
@@ -139,6 +142,7 @@ export interface StudioHost {
 export function useStudioHost(): StudioHost {
   const [index, setIndex] = useState<IndexPayload | null>(null);
   const [prototypes, setPrototypes] = useState<PrototypeIndexPayload | null>(null);
+  const [atlas, setAtlas] = useState<GraphAtlas | null>(null);
   const [graph, setGraph] = useState<GraphView | null>(null);
   const [prototype, setPrototype] = useState<PrototypeView | null>(null);
   const [rsi, setRsi] = useState<RsiView | null>(null);
@@ -225,12 +229,18 @@ export function useStudioHost(): StudioHost {
 
         case 'index':
           setIndex(message.payload);
+          requestedIconsRef.current.clear();
+          setIcons({});
           break;
 
         case 'prototypes':
           setPrototypes(message.payload);
           requestedIconsRef.current.clear();
           setIcons({});
+          break;
+
+        case 'atlas':
+          setAtlas(message.atlas);
           break;
 
         case 'prototype':
@@ -273,6 +283,7 @@ export function useStudioHost(): StudioHost {
             setRsi(null);
             setXaml(null);
             setCSharp(null);
+            setAtlas(null);
           }
           break;
 
@@ -398,6 +409,11 @@ export function useStudioHost(): StudioHost {
   const openDashboard = useCallback(() => {
     setOpeningKey(null);
     post({ type: 'openDashboard' });
+  }, []);
+
+  const openAtlas = useCallback(() => {
+    setOpeningKey(null);
+    post({ type: 'openAtlas' });
   }, []);
 
   const openPrototype = useCallback((id: string, kind?: string) => {
@@ -624,6 +640,7 @@ export function useStudioHost(): StudioHost {
   return {
     index,
     prototypes,
+    atlas,
     graph,
     prototype,
     rsi,
@@ -641,6 +658,7 @@ export function useStudioHost(): StudioHost {
     icons,
     openGraph,
     openDashboard,
+    openAtlas,
     openPrototype,
     openRsi,
     openXaml,

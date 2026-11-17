@@ -555,8 +555,11 @@ export function serializeRsiMeta(
   if (meta.extra) Object.assign(output, meta.extra);
   output.states = meta.states.map((state) => ({
     name: state.name,
-    directions: state.directions,
-    delays: state.delays,
+    ...(state.directions !== 1 ? { directions: state.directions } : {}),
+    // A single frame uses the engine default delay; omit the noisy [[0.1]].
+    ...(state.delays.some((list) => list.length > 1)
+      ? { delays: state.delays }
+      : {}),
     ...(state.flags ?? {}),
   }));
   const text = JSON.stringify(output, null, indent);
