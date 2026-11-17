@@ -231,7 +231,7 @@ export class StudioSession {
           break;
         case 'openDocs':
           this.ide.openUrl(
-            'https://github.com/ss14studio/ss14-studio#readme',
+            'https://github.com/CrazyPhantom779/ss14-studio#readme',
           );
           break;
         case 'openPrototype':

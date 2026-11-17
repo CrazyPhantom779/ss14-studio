@@ -1,7 +1,7 @@
 # SS14 Studio for JetBrains Rider
 
 > **AI-generated project.** This plugin is built with AI assistance and reviewed
-> by humans. Read the [AI disclosure](https://github.com/ss14studio/ss14-studio/blob/main/AI-GENERATED.md)
+> by humans. Read the [AI disclosure](https://github.com/CrazyPhantom779/ss14-studio/blob/main/AI-GENERATED.md)
 > before relying on it in a production pipeline. No AI watermark is added to your
 > files.
 
@@ -305,7 +305,7 @@ sidecar's in-memory index and only rescan changed files. Use
 - The Rider host has no code lenses or editor-title buttons. Use the editor
   context menu, the tool window and the status bar.
 
-Read the full [AI-generated disclosure](https://github.com/ss14studio/ss14-studio/blob/main/AI-GENERATED.md)
+Read the full [AI-generated disclosure](https://github.com/CrazyPhantom779/ss14-studio/blob/main/AI-GENERATED.md)
 for scope, review policy, the no-watermark policy and the complete limitations
 list.
 

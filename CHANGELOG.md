@@ -131,5 +131,5 @@ SS14 Studio is an AI-generated, human-reviewed alpha project. Read the
 - The Rider JCEF tool window has not been verified on a local Rider installation
   in the development environment.
 
-[Unreleased]: https://github.com/ss14studio/ss14-studio/compare/v0.2.0...HEAD
-[0.2.0]: https://github.com/ss14studio/ss14-studio/releases/tag/v0.2.0
+[Unreleased]: https://github.com/CrazyPhantom779/ss14-studio/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/CrazyPhantom779/ss14-studio/releases/tag/v0.2.0

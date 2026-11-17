@@ -1277,7 +1277,7 @@ export class GraphEditorPanel implements vscode.Disposable {
       );
     } catch {
       await vscode.env.openExternal(
-        vscode.Uri.parse('https://github.com/ss14studio/ss14-studio'),
+        vscode.Uri.parse('https://github.com/CrazyPhantom779/ss14-studio'),
       );
     }
   }

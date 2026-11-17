@@ -76,7 +76,7 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` done.
 - [x] Document auto-update behaviour and manual-install limitations
 - [x] Add `PUBLISHING.md` with repo/remote creation, GitHub settings, secrets,
       versioning and release-day checklists
-- [ ] Create the GitHub repository and push `main`
+- [x] Create the GitHub repository and push `main`
 - [ ] Configure branch/tag protection, security features and marketplace secrets
 - [ ] Publish the first VSIX to VS Code Marketplace and Open VSX
 - [ ] Verify the signed Rider ZIP in a local Rider installation

@@ -30,6 +30,16 @@ intellijPlatform {
     instrumentCode = false
     buildSearchableOptions = false
 
+    signing {
+        certificateChain.set(providers.environmentVariable("CERTIFICATE_CHAIN"))
+        privateKey.set(providers.environmentVariable("PRIVATE_KEY"))
+        password.set(providers.environmentVariable("PRIVATE_KEY_PASSWORD"))
+    }
+
+    publishing {
+        token.set(providers.environmentVariable("PUBLISH_TOKEN"))
+    }
+
     pluginConfiguration {
         id = "dev.ss14studio.rider"
         name = "SS14 Studio"
@@ -47,7 +57,7 @@ intellijPlatform {
         """.trimIndent()
         vendor {
             name = "SS14 Studio"
-            url = "https://github.com/ss14studio/ss14-studio"
+            url = "https://github.com/CrazyPhantom779/ss14-studio"
         }
         ideaVersion {
             sinceBuild = "242"

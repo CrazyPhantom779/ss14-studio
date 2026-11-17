@@ -8,8 +8,8 @@ body:
       value: |
         SS14 Studio keeps native editors as the default and adds opt-in Studio
         views. Please describe the workflow you are trying to complete, not only
-        the UI you imagine. Read the [AI disclosure](https://github.com/ss14studio/ss14-studio/blob/main/AI-GENERATED.md)
-        and the [known limitations](https://github.com/ss14studio/ss14-studio#known-limitations) first.
+        the UI you imagine. Read the [AI disclosure](https://github.com/CrazyPhantom779/ss14-studio/blob/main/AI-GENERATED.md)
+        and the [known limitations](https://github.com/CrazyPhantom779/ss14-studio#known-limitations) first.
 
   - type: textarea
     id: problem

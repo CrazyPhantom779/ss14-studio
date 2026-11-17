@@ -226,5 +226,5 @@ jobs:
         working-directory: apps/rider
         run: |
           chmod +x gradlew
-          ./gradlew signPlugin publishPlugin --no-daemon
+          ./gradlew publishPlugin --no-daemon
 

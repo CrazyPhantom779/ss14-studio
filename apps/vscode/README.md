@@ -1,7 +1,7 @@
 # SS14 Studio for VS Code
 
 > **AI-generated project.** This extension is built with AI assistance and
-> reviewed by humans. Read the [AI disclosure](https://github.com/ss14studio/ss14-studio/blob/main/AI-GENERATED.md)
+> reviewed by humans. Read the [AI disclosure](https://github.com/CrazyPhantom779/ss14-studio/blob/main/AI-GENERATED.md)
 > before relying on it in a production pipeline. No AI watermark is added to your
 > files.
 
@@ -250,14 +250,14 @@ Known limitations:
 - Diff views are read-only and never auto-merge.
 - The first index of a large SS14 fork takes a few seconds.
 
-Read the full [AI-generated disclosure](https://github.com/ss14studio/ss14-studio/blob/main/AI-GENERATED.md)
+Read the full [AI-generated disclosure](https://github.com/CrazyPhantom779/ss14-studio/blob/main/AI-GENERATED.md)
 for scope, review policy and the no-watermark policy.
 
 ## Links
 
-- [Repository](https://github.com/ss14studio/ss14-studio)
-- [Issues](https://github.com/ss14studio/ss14-studio/issues)
-- [AI disclosure](https://github.com/ss14studio/ss14-studio/blob/main/AI-GENERATED.md)
-- [License](https://github.com/ss14studio/ss14-studio/blob/main/LICENSE)
+- [Repository](https://github.com/CrazyPhantom779/ss14-studio)
+- [Issues](https://github.com/CrazyPhantom779/ss14-studio/issues)
+- [AI disclosure](https://github.com/CrazyPhantom779/ss14-studio/blob/main/AI-GENERATED.md)
+- [License](https://github.com/CrazyPhantom779/ss14-studio/blob/main/LICENSE)
 
 SS14 Studio is not affiliated with Space Wizards Federation or RobustToolbox.

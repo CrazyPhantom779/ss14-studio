@@ -110,7 +110,7 @@ export function AboutPanel({ host }: { host: StudioHost }) {
           <Button
             icon={ExternalLink}
             variant="primary"
-            onClick={() => host.openPath('https://github.com/ss14studio/ss14-studio')}
+            onClick={() => host.openPath('https://github.com/CrazyPhantom779/ss14-studio')}
           >
             GitHub
           </Button>

@@ -2,14 +2,15 @@
 
 This checklist covers the one-time GitHub/repository setup, marketplace
 accounts, CI secrets, versioning, and the release process. It is written so a
-maintainer can go from a local checkout with no remote to an automatically
-updated extension in every marketplace.
+maintainer can go from a local checkout to an automatically updated extension
+in every marketplace.
 
-> **Current status:** no git remote is configured in this checkout. The workflow
-> and scripts below are ready, but the push, first release and marketplace
-> listings require the repository owner to create the GitHub repository and
-> marketplace accounts. Nothing in the extension phones home; updates are
-> delivered by the marketplaces, not by a custom updater.
+> **Current status:** the repository is at
+> <https://github.com/CrazyPhantom779/ss14-studio> and `main` is pushed. The
+> remaining work is creating the marketplace publishers, optionally tightening
+> repository settings, adding secrets, and pushing the first `v*` tag. Nothing
+> in the extension phones home; updates are delivered by the marketplaces, not
+> by a custom updater.
 
 ---
 
@@ -17,46 +18,57 @@ updated extension in every marketplace.
 
 | Account | Used for | Notes |
 | --- | --- | --- |
-| GitHub organisation or user | Source, issues, releases, Actions | `ss14studio` is the publisher id used by the extension. |
+| GitHub user `CrazyPhantom779` | Source, issues, releases, Actions | Already created. |
 | Azure DevOps organisation | VS Code Marketplace publisher + PAT | The Marketplace uses an Azure DevOps PAT, not a GitHub token. |
-| Eclipse Foundation account | Open VSX | Sign in with GitHub, then link the `ss14studio` namespace. |
+| Eclipse Foundation account | Open VSX | Sign in with GitHub, then claim the `ss14studio` namespace. |
 | JetBrains Account | JetBrains Marketplace | Create the vendor profile `SS14 Studio`. |
 
-The VS Code extension currently declares `"publisher": "ss14studio"`. Create
-that publisher id on both the VS Code Marketplace and Open VSX, or change
-`apps/vscode/package.json` to the id you own before publishing.
+The VS Code extension declares `"publisher": "ss14studio"`. Create that
+publisher id on both the VS Code Marketplace and Open VSX, or change
+`apps/vscode/package.json` to an id you own and rebuild before publishing. The
+publisher id does **not** have to match your GitHub username.
 
-The Rider plugin currently declares vendor `SS14 Studio` and plugin id
+The Rider plugin declares vendor `SS14 Studio` and plugin id
 `dev.ss14studio.rider` in `apps/rider/build.gradle.kts`.
 
 ---
 
-## 2. Create the GitHub repository
+## 2. GitHub repository
 
-From the repository root:
+The remote is already configured:
 
 ```bash
-git remote add origin https://github.com/<owner>/ss14-studio.git
+git remote -v
+# origin  https://github.com/CrazyPhantom779/ss14-studio.git (fetch)
+# origin  https://github.com/CrazyPhantom779/ss14-studio.git (push)
 git push -u origin main
 ```
 
-If the repository does not exist yet, create it first (empty, no README) and
-then push. Keep the default branch named `main`; the workflow triggers on
-`main` and on `v*` tags.
+Keep the default branch named `main`; the workflow triggers on `main` and on
+`v*` tags.
 
 ### First push checklist
 
-- [ ] Repository exists and is empty (no auto-generated README).
-- [ ] `git remote -v` points at the intended repository.
-- [ ] `main` is pushed and is the default branch.
-- [ ] The local `releases/` directory is ignored and never committed.
+- [x] Repository exists and `main` is pushed.
+- [x] `git remote -v` points at `CrazyPhantom779/ss14-studio`.
+- [x] The local `releases/` directory is ignored and never committed.
 - [ ] Tags use the `v<version>` form, for example `v0.2.0`.
 
 ---
 
 ## 3. Repository settings
 
-Configure these in **Settings** after the first push.
+Configure these in **Settings** after the first push. Direct links for this
+repository:
+
+| Page | URL |
+| --- | --- |
+| General | <https://github.com/CrazyPhantom779/ss14-studio/settings> |
+| Branches | <https://github.com/CrazyPhantom779/ss14-studio/settings/branches> |
+| Tags | <https://github.com/CrazyPhantom779/ss14-studio/settings/tags> |
+| Actions | <https://github.com/CrazyPhantom779/ss14-studio/settings/actions> |
+| Secrets | <https://github.com/CrazyPhantom779/ss14-studio/settings/secrets/actions> |
+| Security | <https://github.com/CrazyPhantom779/ss14-studio/security> |
 
 ### General
 
@@ -72,12 +84,14 @@ Configure these in **Settings** after the first push.
 
 ### Access and safety
 
-- [ ] Branch protection on `main`:
+- [ ] Branch protection on `main` (recommended once you have collaborators):
   - Require a pull request before merging.
   - Require status checks: **Test (ubuntu-latest)** and
     **Test (windows-latest)**.
   - Require conversation resolution.
   - Do not allow force pushes or deletions.
+  - For a solo repository you can skip this until you start using pull
+    requests; GitHub otherwise rejects direct pushes to `main`.
 - [ ] Tag protection for `v*` (Settings → Tags → New rule).
 - [ ] Actions → General:
   - Allow all actions, or restrict to GitHub-authored actions plus the two
@@ -88,28 +102,49 @@ Configure these in **Settings** after the first push.
     that needs it.
 - [ ] Security:
   - Enable Dependabot alerts and security updates.
-  - Enable CodeQL (the workflow is committed).
+  - The committed CodeQL workflow handles code scanning; do not also enable
+    the separate **Default** CodeQL setup.
   - Enable private vulnerability reporting and point it at `SECURITY.md`.
 - [ ] Environments: create a `marketplace` environment (optional) and attach
       the publishing secrets there instead of at repository level.
 
 ### Secrets
 
-Add these under **Settings → Secrets and variables → Actions**. All are
-optional: the workflow skips a marketplace when its token is absent, and the
-GitHub release still succeeds.
+Add these under **Settings → Secrets and variables → Actions → New repository
+secret** (<https://github.com/CrazyPhantom779/ss14-studio/settings/secrets/actions>).
+Use the exact names below; secret values are write-only after saving.
 
-| Secret | Marketplace | How to create it |
+All marketplace secrets are optional. Without a token the workflow skips that
+marketplace and still publishes the GitHub release.
+
+| Secret | Marketplace | How to obtain it |
 | --- | --- | --- |
-| `VSCE_PAT` | VS Code Marketplace | Azure DevOps → User settings → Personal access tokens. Scope: **Marketplace → Manage**. Copy once. |
-| `OPEN_VSX_TOKEN` | Open VSX | <https://open-vsx.org> → Settings → Access Tokens. |
-| `JETBRAINS_MARKETPLACE_TOKEN` | JetBrains Marketplace | <https://plugins.jetbrains.com/author/me/tokens>. |
-| `JETBRAINS_CERTIFICATE_CHAIN` | Plugin signing | PEM certificate chain from the JetBrains plugin-signing service. |
-| `JETBRAINS_PRIVATE_KEY` | Plugin signing | PEM private key from the same service. |
-| `JETBRAINS_PRIVATE_KEY_PASSWORD` | Plugin signing | Password chosen when the key was created. |
+| `VSCE_PAT` | VS Code Marketplace | 1. Sign in at <https://marketplace.visualstudio.com/manage> and create publisher `ss14studio` (or the id you chose). 2. Sign in at <https://dev.azure.com> with the same Microsoft account. 3. User settings → Personal access tokens → **New Token**. 4. Organization: **All accessible organizations**. 5. Scopes: **Custom defined → Marketplace → Manage**. 6. Copy the token once. |
+| `OPEN_VSX_TOKEN` | Open VSX | 1. Sign in at <https://open-vsx.org> with GitHub. 2. Claim the `ss14studio` namespace at <https://open-vsx.org/user-settings/namespaces>. 3. Generate a token at <https://open-vsx.org/user-settings/tokens>. |
+| `JETBRAINS_MARKETPLACE_TOKEN` | JetBrains Marketplace | 1. Sign in at <https://plugins.jetbrains.com>. 2. Create the vendor profile `SS14 Studio` under <https://plugins.jetbrains.com/author/me>. 3. Generate a token at <https://plugins.jetbrains.com/author/me/tokens>. |
+| `JETBRAINS_CERTIFICATE_CHAIN` | Plugin signing | Self-generated certificate, **not** issued by JetBrains. See the commands below and paste the full `chain.crt` PEM text. |
+| `JETBRAINS_PRIVATE_KEY` | Plugin signing | The PEM private key from the same key pair. Paste the full PEM text, including the BEGIN/END lines. |
+| `JETBRAINS_PRIVATE_KEY_PASSWORD` | Plugin signing | The password chosen while generating the encrypted key. Leave empty if you use an unencrypted key. |
 
-> Plugin signing is optional for a private listing but required for the public
-> JetBrains Marketplace. Keep the private key out of the repository.
+Generate a signing key pair and self-signed certificate (JDK/OpenSSL 3 is
+fine; run this outside the repository and never commit the files):
+
+```bash
+openssl genpkey -aes-256-cbc -algorithm RSA \
+  -out private_encrypted.pem -pkeyopt rsa_keygen_bits:4096
+# Choose a password when prompted.
+openssl rsa -in private_encrypted.pem -out private.pem
+openssl req -key private.pem -new -x509 -days 365 -out chain.crt
+```
+
+Use `private_encrypted.pem` as `JETBRAINS_PRIVATE_KEY` and the password you
+chose as `JETBRAINS_PRIVATE_KEY_PASSWORD`. If you use the unencrypted
+`private.pem` instead, the password secret can be empty. Use `chain.crt` as
+`JETBRAINS_CERTIFICATE_CHAIN`.
+
+> Plugin signing is optional for a private listing but recommended for the
+> public JetBrains Marketplace. Keep the private key out of the repository and
+> out of build logs.
 
 ---
 
@@ -220,7 +255,7 @@ node apps/rider/scripts/smoke.mjs C:\path\to\SS14\repo
 
 - [ ] Vendor profile `SS14 Studio` is created.
 - [ ] `untilBuild = "263.*"` is intentional for the current release.
-- [ ] Plugin ZIP is signed with the JetBrains certificate.
+- [ ] Plugin ZIP is signed with the project's self-signed certificate.
 - [ ] The plugin description includes the AI disclosure and Node.js
       requirement.
 - [ ] Compatible Rider versions are checked in the listing.
@@ -254,9 +289,10 @@ node apps/rider/scripts/smoke.mjs C:\path\to\SS14\repo
 `apps/vscode/package.json` must match a publisher you own on that marketplace.
 Create it, or change the field and re-release.
 
-**The Rider ZIP is unsigned.** `signPlugin` needs all three signing secrets. If
-they are missing, the release job still uploads the ZIP to GitHub, but the
-JetBrains Marketplace may reject it.
+**The Rider ZIP is unsigned.** Signing needs all three signing secrets. If they
+are missing, `publishPlugin` still uploads the plugin but the marketplace may
+show an unsigned-plugin warning. The GitHub release is unaffected. Add the three
+secrets and re-run the job to sign it.
 
 **The workflow skipped a marketplace.** That is deliberate when the matching
 secret is empty. Add the secret and re-run the job.

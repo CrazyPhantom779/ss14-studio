@@ -8,11 +8,11 @@
   "private": true,
   "repository": {
     "type": "git",
-    "url": "https://github.com/ss14studio/ss14-studio"
+    "url": "https://github.com/CrazyPhantom779/ss14-studio"
   },
-  "homepage": "https://github.com/ss14studio/ss14-studio#readme",
+  "homepage": "https://github.com/CrazyPhantom779/ss14-studio#readme",
   "bugs": {
-    "url": "https://github.com/ss14studio/ss14-studio/issues"
+    "url": "https://github.com/CrazyPhantom779/ss14-studio/issues"
   },
   "engines": {
     "vscode": "^1.90.0"

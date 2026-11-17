@@ -61,7 +61,7 @@ Instances of abusive, harassing, or otherwise unacceptable behavior may be
 reported to the maintainers privately through the repository's security
 advisory form:
 
-<https://github.com/ss14studio/ss14-studio/security/advisories/new>
+<https://github.com/CrazyPhantom779/ss14-studio/security/advisories/new>
 
 Mark the report as a code-of-conduct concern. Do not open a public issue.
 All complaints will be reviewed and investigated promptly and fairly.

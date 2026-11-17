@@ -1,7 +1,7 @@
 <idea-plugin>
   <id>dev.ss14studio.rider</id>
   <name>SS14 Studio</name>
-  <vendor url="https://github.com/ss14studio/ss14-studio">SS14 Studio</vendor>
+  <vendor url="https://github.com/CrazyPhantom779/ss14-studio">SS14 Studio</vendor>
 
   <description><![CDATA[
     <p><b>SS14 Studio</b> is an all-in-one Space Station 14 development companion for JetBrains Rider.</p>

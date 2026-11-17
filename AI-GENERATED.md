@@ -148,7 +148,7 @@ considered when evaluating AI-generated output:
 1. **Review AI-assisted output before shipping it.** This applies to code
    changes, generated XAML, extracted partials and sprite edits.
 2. **Report problems.** Open an issue at
-   <https://github.com/ss14studio/ss14-studio/issues> with the file, a minimal
+   <https://github.com/CrazyPhantom779/ss14-studio/issues> with the file, a minimal
    reproduction and the version shown in the About panel.
 3. **Do not assume engine parity.** If a visual result matters, verify it in the
    game client or in RobustToolbox tooling.

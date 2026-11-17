@@ -11,7 +11,7 @@ Code and JetBrains Rider.**
 
 ![AI-generated](https://img.shields.io/badge/AI-generated%20%C2%B7%20human--reviewed-8b5cf6)
 ![status](https://img.shields.io/badge/status-alpha-f59e0b)
-[![build](https://github.com/ss14studio/ss14-studio/actions/workflows/build.yml/badge.svg)](https://github.com/ss14studio/ss14-studio/actions/workflows/build.yml)
+[![build](https://github.com/CrazyPhantom779/ss14-studio/actions/workflows/build.yml/badge.svg)](https://github.com/CrazyPhantom779/ss14-studio/actions/workflows/build.yml)
 ![tests](https://img.shields.io/badge/tests-193%20passing-22c55e)
 ![VS Code](https://img.shields.io/badge/VS%20Code-%5E1.90-22d3ee)
 ![Rider](https://img.shields.io/badge/Rider-2024.2%2B-22d3ee)
@@ -220,7 +220,7 @@ the window after installing.
 The marketplace listing is prepared but not yet published. Until then, use the
 VSIX from the `releases/` directory, build it locally (see
 [Development](#development)), or install the artifact attached to a
-[GitHub release](https://github.com/ss14studio/ss14-studio/releases). The
+[GitHub release](https://github.com/CrazyPhantom779/ss14-studio/releases). The
 marketplace and JetBrains publishing checklist lives in
 [`PUBLISHING.md`](./PUBLISHING.md).
 
@@ -525,7 +525,7 @@ no-watermark policy and the full limitations.
 ## Contributing
 
 Issues and pull requests are welcome at
-<https://github.com/ss14studio/ss14-studio>. Read
+<https://github.com/CrazyPhantom779/ss14-studio>. Read
 [`CONTRIBUTING.md`](./CONTRIBUTING.md) for the development workflow, design rules
 and test requirements, and follow the
 [Code of Conduct](./CODE_OF_CONDUCT.md). Security issues should use

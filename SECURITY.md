@@ -11,7 +11,7 @@ Do **not** open a public issue for a security problem.
 
 Report it privately through GitHub's security advisory form:
 
-<https://github.com/ss14studio/ss14-studio/security/advisories/new>
+<https://github.com/CrazyPhantom779/ss14-studio/security/advisories/new>
 
 Include:
 
