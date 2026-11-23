@@ -476,7 +476,7 @@
     "@ss14-studio/core": "*",
     "@types/node": "^22.10.2",
     "@types/vscode": "^1.90.0",
-    "esbuild": "^0.24.0",
+    "esbuild": "^0.28.2",
     "typescript": "^5.7.2"
   }
 }
